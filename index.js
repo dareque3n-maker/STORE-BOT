@@ -1,7 +1,7 @@
 require('dotenv').config(); 
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { connectDB } = require('./db'); 
-const { handleInteraction } = require('./interactions');
+const { handleInteractions } = require('./interactions');
 
 const client = new Client({
     intents: [
@@ -11,59 +11,61 @@ const client = new Client({
     ]
 });
 
-// Database Setup
+// Database Connection Bridge Setup
 const mongoURI = process.env.MONGO_URI || process.env.MONGO_URL;
 if (!mongoURI) {
-    console.error('❌ CRITICAL ERROR: Database Connection String missing!');
+    console.error('❌ CRITICAL ERROR: Database Connection String missing on Railway!');
     process.exit(1);
 }
 
-// Slash Commands Layout
+// Clean and Original Admin Slash Commands Layout
 const commands = [
     new SlashCommandBuilder()
         .setName('store')
         .setDescription('Store administration management panel')
         .addSubcommand(subcommand =>
             subcommand
-                .setName('bulk')
-                .setDescription('Bulk import categories and items at once')
-                .addStringOption(option => 
-                    option.setName('input')
-                        .setDescription('Format: Category:item-price || Category2:item-price')
-                        .setRequired(true)
-                )
+                .setName('configurations')
+                .setDescription('Configure base store database setups')
         )
         .addSubcommand(subcommand =>
             subcommand
                 .setName('panel')
-                .setDescription('Send the active interactive shop storefront panel')
+                .setDescription('Deploy front facing shop panel')
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('execution')
+                .setDescription('Route command engine strings mapping')
         )
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
-    console.log(`🤖 Logged in as ${client.user.tag}!`);
+    console.log(`🤖 Logged in successfully as ${client.user.tag}!`);
     
-    // Auto register commands
+    // Auto sync and refresh clean slash commands matrix to Discord API
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('🔄 Refreshing application (/) commands...');
+        console.log('🔄 Cleaning cache and refreshing original execution application (/) commands...');
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: commands },
         );
-        console.log('✅ Successfully reloaded commands.');
+        console.log('✅ Application (/) commands successfully re-synchronized globally.');
     } catch (error) {
         console.error('❌ Slash command registration failed:', error);
     }
 });
 
+// Fire Database connection mapping
 connectDB(mongoURI);
 
+// Gateway Interactions Listener
 client.on('interactionCreate', async (interaction) => {
     try {
-        await handleInteraction(interaction);
+        await handleInteractions(interaction);
     } catch (err) {
-        console.error('Interaction exception:', err);
+        console.error('Interaction gateway runtime exception:', err);
     }
 });
 
