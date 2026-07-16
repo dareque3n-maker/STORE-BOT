@@ -1,50 +1,69 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
-const { connectDB } = require('./db');
-const { registerSlashCommands } = require('./commands');
-const { handleInteractions } = require('./interactions');
+require('dotenv').config(); 
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { connectDB } = require('./db'); 
+const { handleInteraction } = require('./interactions');
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.MessageContent
     ]
 });
 
-// Database Initialization
-if (process.env.MONGO_URI) {
-    connectDB(process.env.MONGO_URI);
-} else {
-    console.error('❌ CRITICAL ERROR: MONGO_URI missing in .env environment!');
+// Database Setup
+const mongoURI = process.env.MONGO_URI || process.env.MONGO_URL;
+if (!mongoURI) {
+    console.error('❌ CRITICAL ERROR: Database Connection String missing!');
     process.exit(1);
 }
 
-// Bot Gateway Listener
+// Slash Commands Layout
+const commands = [
+    new SlashCommandBuilder()
+        .setName('store')
+        .setDescription('Store administration management panel')
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('bulk')
+                .setDescription('Bulk import categories and items at once')
+                .addStringOption(option => 
+                    option.setName('input')
+                        .setDescription('Format: Category:item-price || Category2:item-price')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('panel')
+                .setDescription('Send the active interactive shop storefront panel')
+        )
+].map(command => command.toJSON());
+
 client.once('ready', async () => {
-    console.log(`🔥 ${client.user.tag} status check: Online and Functional!`);
+    console.log(`🤖 Logged in as ${client.user.tag}!`);
     
-    // Deploys the application slash structures dynamically on startup
+    // Auto register commands
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        const commandsData = registerSlashCommands();
+        console.log('🔄 Refreshing application (/) commands...');
         await rest.put(
             Routes.applicationCommands(client.user.id),
-            { body: commandsData }
+            { body: commands },
         );
-        console.log('🚀 Successfully reloaded application (/) slash commands global blueprints.');
+        console.log('✅ Successfully reloaded commands.');
     } catch (error) {
-        console.error('❌ Failed to register global commands structural mappings:', error);
+        console.error('❌ Slash command registration failed:', error);
     }
 });
 
-// Central Event Handler Router for Interactions (Menus, Modals, Buttons)
+connectDB(mongoURI);
+
 client.on('interactionCreate', async (interaction) => {
     try {
-        await handleInteractions(interaction);
-    } catch (error) {
-        console.error('❌ Intercepted runtime exception inside interaction event wrapper:', error);
+        await handleInteraction(interaction);
+    } catch (err) {
+        console.error('Interaction exception:', err);
     }
 });
 
