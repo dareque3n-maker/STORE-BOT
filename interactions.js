@@ -8,83 +8,14 @@ const handleInteractions = async (interaction) => {
 
     // Route Slash Commands First
     if (interaction.isChatInputCommand()) {
-        const { commandName, options } = interaction;
-        const subCommand = options.getSubcommand(false);
-
-        if (commandName === 'store') {
-            // =================================================================
-            // NEW BULK IMPORT ENGINE (INTEGRATED SAFELY)
-            // =================================================================
-            if (subCommand === 'bulk') {
-                const inputString = options.getString('input');
-                await interaction.deferReply({ ephemeral: true });
-
-                try {
-                    let store = await GuildStore.findOne({ guildId });
-                    if (!store) store = new GuildStore({ guildId, items: [], categories: [] });
-
-                    // 1. Split categories blocks using ||
-                    const categoryBlocks = inputString.split('||');
-
-                    categoryBlocks.forEach(block => {
-                        const parts = block.split(':');
-                        if (parts.length < 2) return;
-
-                        const categoryName = parts[0].trim();
-                        const itemsRaw = parts[1].split(',');
-
-                        if (!store.categories.includes(categoryName) && categoryName) {
-                            store.categories.push(categoryName);
-                        }
-
-                        // 2. Loop and map individual items inside this block split
-                        itemsRaw.forEach(itemRaw => {
-                            const itemParts = itemRaw.split('-');
-                            if (itemParts.length < 2) return;
-
-                            const itemName = itemParts[0].trim();
-                            const itemPrice = parseInt(itemParts[1].replace(/[^0-9]/g, ''), 10);
-
-                            if (itemName && !isNaN(itemPrice)) {
-                                const existingIndex = store.items.findIndex(
-                                    i => i.name.toLowerCase() === itemName.toLowerCase() && i.category.toLowerCase() === categoryName.toLowerCase()
-                                );
-
-                                const newItem = {
-                                    name: itemName,
-                                    price: itemPrice,
-                                    category: categoryName,
-                                    command: `give {name} ${itemName.toLowerCase()} 1` // Kept default context template match
-                                };
-
-                                if (existingIndex > -1) {
-                                    store.items[existingIndex] = newItem;
-                                } else {
-                                    store.items.push(newItem);
-                                }
-                            }
-                        });
-                    });
-
-                    await store.save();
-                    return interaction.editReply({ content: '✅ **Bulk Import Ho Gaya!** Saari categories aur items details successfully database me parse ho chuki hain.' });
-
-                } catch (err) {
-                    console.error("Bulk Import Exception:", err);
-                    return interaction.editReply({ content: '❌ Parsing internal error! Format verify karein (Category:item-price).' });
-                }
-            }
-        }
-
-        // Default slash command framework fallback handler
         return await handleSlashCommands(interaction);
     }
 
     // =================================================================
-    // 1. MODAL SUBMISSIONS INTERCEPTOR (ADMIN SETUP & CHECKOUT)
+    // 1. MODAL SUBMISSIONS INTERCEPTOR (ADMIN SETUP)
     // =================================================================
     if (interaction.isModalSubmit()) {
-        // --- MODAL: CONFIGURATIONS ---
+        // --- MODAL: CONFIGURATIONS (BULK CATEGORY & ITEM PARSER CONNECTED) ---
         if (interaction.customId === 'modal_store_configs') {
             await interaction.deferReply({ ephemeral: true });
             
@@ -92,26 +23,59 @@ const handleInteractions = async (interaction) => {
             const adminRoleId = interaction.fields.getTextInputValue('cfg_role');
             const logsChannelId = interaction.fields.getTextInputValue('cfg_logs');
             
-            const categories = interaction.fields.getTextInputValue('cfg_cats').split(',').map(c => c.trim());
-            const itemsRaw = interaction.fields.getTextInputValue('cfg_items').split(',').map(i => i.trim());
+            // Expected Format: Ranks:frost-100inr, mega-200inr || Keys:common-50inr, mythic-100inr
+            const bulkInput = interaction.fields.getTextInputValue('cfg_items');
             
-            const items = itemsRaw.map(str => {
-                const parts = str.split('-');
-                return {
-                    category: categories[0] || 'General',
-                    name: parts[0]?.trim(),
-                    price: parts[1]?.trim() || 'Free',
-                    command: ''
-                };
-            });
+            const categories = [];
+            const items = [];
 
-            await GuildStore.findOneAndUpdate(
-                { guildId },
-                { serverName, adminRoleId, logsChannelId, categories, items },
-                { upsert: true, new: true }
-            );
+            try {
+                // Split distinct category blocks using ||
+                const categoryBlocks = bulkInput.split('||');
 
-            return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Base store data, roles, logs and items inventory mapped cleanly into database.' });
+                categoryBlocks.forEach(block => {
+                    const parts = block.split(':');
+                    if (parts.length < 2) return;
+
+                    const categoryName = parts[0].trim();
+                    const itemsRaw = parts[1].split(',');
+
+                    if (!categories.includes(categoryName) && categoryName) {
+                        categories.push(categoryName);
+                    }
+
+                    // Loop through individual items inside this specific block split
+                    itemsRaw.forEach(itemRaw => {
+                        const itemParts = itemRaw.split('-');
+                        if (itemParts.length < 2) return;
+
+                        const itemName = itemParts[0].trim();
+                        // Extract only price numbers digits (strips 'inr', 'rs', etc.)
+                        const itemPrice = parseInt(itemParts[1].replace(/[^0-9]/g, ''), 10);
+
+                        if (itemName && !isNaN(itemPrice)) {
+                            items.push({
+                                category: categoryName,
+                                name: itemName,
+                                price: itemPrice,
+                                command: '' // Left blank to be routed via step 3 matrix later
+                            });
+                        }
+                    });
+                });
+
+                await GuildStore.findOneAndUpdate(
+                    { guildId },
+                    { serverName, adminRoleId, logsChannelId, categories, items },
+                    { upsert: true, new: true }
+                );
+
+                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Mapped categories and items dynamic split inventory through advanced text parse system.' });
+
+            } catch (parseError) {
+                console.error("Modal Data Parsing Error:", parseError);
+                return await interaction.editReply({ content: '❌ **Parsing Failed!** Item box ke format check karo (Category:item-price || Category2:item-price).' });
+            }
         }
 
         // --- MODAL: PANEL VISUAL DEPLOYMENT ---
@@ -143,7 +107,7 @@ const handleInteractions = async (interaction) => {
             }
 
             if (!store.categories || store.categories.length === 0) {
-                return await interaction.editReply({ content: '❌ Base categories array is empty. Please run config/bulk items setup first.' });
+                return await interaction.editReply({ content: '❌ Base categories array is empty. Please run `/store configurations` first.' });
             }
 
             const catOptions = store.categories.map(cat => ({ label: cat, value: `store_cat_${cat}` }));
@@ -166,7 +130,7 @@ const handleInteractions = async (interaction) => {
             const mappingsRaw = interaction.fields.getTextInputValue('exe_cmds').split('||').map(m => m.trim());
 
             const store = await GuildStore.findOne({ guildId });
-            if (!store) return await interaction.editReply({ content: '❌ No storefront database file registered for this server.' });
+            if (!store) return await interaction.editReply({ content: '❌ No storefront database file registered for this server. Run configs first.' });
 
             store.consoleChannelId = consoleChannelId;
 
@@ -198,7 +162,7 @@ const handleInteractions = async (interaction) => {
 
             const ticketRoom = await interaction.guild.channels.create({
                 name: `order-${interaction.user.username}`,
-                type: 0,
+                type: 0, 
                 permissionOverwrites: [
                     { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
                     { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
@@ -224,7 +188,7 @@ const handleInteractions = async (interaction) => {
                     { name: '👤 Buyer Account', value: `${interaction.user}`, inline: true },
                     { name: '🎮 In-Game Username', value: `\`${buyerIGN}\``, inline: true },
                     { name: '📦 Selected Package', value: `**${item.name}** (${item.category})`, inline: false },
-                    { name: '💰 Total Value', value: `\`${item.price}\``, inline: true }
+                    { name: '💰 Total Value', value: `\`${item.price} INR\``, inline: true }
                 )
                 .setTimestamp();
 
@@ -251,7 +215,7 @@ const handleInteractions = async (interaction) => {
             const filteredItems = store.items.filter(i => i.category === chosenCat);
 
             if (filteredItems.length === 0) {
-                return await interaction.reply({ content: '❌ No active items listed under this department yet.', ephemeral: true });
+                return await interaction.reply({ content: '❌ No active items listed under this structural department yet.', ephemeral: true });
             }
 
             const itemOptions = filteredItems.map(i => ({
@@ -266,7 +230,7 @@ const handleInteractions = async (interaction) => {
                     .addOptions(itemOptions)
             );
 
-            return await interaction.reply({ content: `📁 Showing results inside cluster: **${chosenCat}**`, components: [rowItems], ephemeral: true });
+            return await interaction.reply({ content: `📁 Showing results inside structural cluster: **${chosenCat}**`, components: [rowItems], ephemeral: true });
         }
 
         if (interaction.customId === 'store_item_select') {
@@ -316,7 +280,6 @@ const handleInteractions = async (interaction) => {
             return await interaction.reply({ content: '❌ Unauthorized Access: Operational Staff Clearance Required.', ephemeral: true });
         }
 
-        // --- BUTTON ACTION: APPROVE ORDER ---
         if (interaction.customId === 'btn_order_approve') {
             await interaction.deferReply();
             
@@ -333,7 +296,7 @@ const handleInteractions = async (interaction) => {
             const buyerUser = await interaction.client.users.fetch(ticket.buyerId).catch(() => null);
             if (buyerUser) {
                 await buyerUser.send({
-                    content: `📦 **Order Dispatch Notice [${store.serverName || 'Store'}]:** Hey! Your digital item purchase request for **${ticket.itemName}** has been verified and successfully approved! Check in-game assets directly. Thank you! 🎉`
+                    content: `📦 **Order Dispatch Notice [${store.serverName}]:** Hey! Your digital item purchase request for **${ticket.itemName}** has been verified and successfully approved! Check in-game assets directly. Thank you! 🎉`
                 }).catch(() => null);
             }
 
@@ -341,14 +304,13 @@ const handleInteractions = async (interaction) => {
             return await interaction.message.edit({ components: [] });
         }
 
-        // --- BUTTON ACTION: REJECT ORDER ---
         if (interaction.customId === 'btn_order_reject') {
             await interaction.deferReply();
 
             const buyerUser = await interaction.client.users.fetch(ticket.buyerId).catch(() => null);
             if (buyerUser) {
                 await buyerUser.send({
-                    content: `❌ **Order Rejection Notice [${store.serverName || 'Store'}]:** Hello. Your transaction request asset allocation for **${ticket.itemName}** has been declined by administration staff.`
+                    content: `❌ **Order Rejection Notice [${store.serverName}]:** Hello. Your transaction request asset allocation for **${ticket.itemName}** has been declined by administration staff.`
                 }).catch(() => null);
             }
 
@@ -356,7 +318,6 @@ const handleInteractions = async (interaction) => {
             return await interaction.message.edit({ components: [] });
         }
 
-        // --- BUTTON ACTION: DELETE ROOM & LOG TRANSCRIPTS ---
         if (interaction.customId === 'btn_order_delete') {
             await interaction.reply({ content: '🗑️ Generating secure text logs transcripts... Closing space arrays permanently in 5 seconds.' });
 
