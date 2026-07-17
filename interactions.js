@@ -301,7 +301,12 @@ const handleInteractions = async (interaction) => {
             }
 
             await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads successfully. Channel ready to be deleted.` });
-            return await interaction.message.edit({ components: [] });
+            
+            // FIXED: Sirf Delete Room button ko active chhodega, baaki remove karega
+            const deleteOnlyRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
+            );
+            return await interaction.message.edit({ components: [deleteOnlyRow] });
         }
 
         if (interaction.customId === 'btn_order_reject') {
@@ -315,7 +320,12 @@ const handleInteractions = async (interaction) => {
             }
 
             await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified. Freezing control deck values.` });
-            return await interaction.message.edit({ components: [] });
+            
+            // FIXED: Sirf Delete Room button ko active chhodega, baaki remove karega
+            const deleteOnlyRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
+            );
+            return await interaction.message.edit({ components: [deleteOnlyRow] });
         }
 
         if (interaction.customId === 'btn_order_delete') {
@@ -353,4 +363,4 @@ const handleInteractions = async (interaction) => {
 };
 
 module.exports = { handleInteractions };
-                       
+                                               
