@@ -131,11 +131,11 @@ const handleInteractions = async (interaction) => {
                     { upsert: true, new: true }
                 );
 
-                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Categories and items configurations successfully parse updated into DB.' });
+                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Categories and items configured successfully.' });
 
             } catch (parseError) {
                 console.error(parseError);
-                return await interaction.editReply({ content: '❌ **Parsing Failed!** Form input details strictly check karo.' });
+                return await interaction.editReply({ content: '❌ **Parsing Failed!** Form input check karo.' });
             }
         }
 
@@ -154,7 +154,7 @@ const handleInteractions = async (interaction) => {
             );
 
             const targetChannel = interaction.guild.channels.cache.get(targetChanId);
-            if (!targetChannel) return await interaction.editReply({ content: '❌ Invalid Destination Target Channel ID!' });
+            if (!targetChannel) return await interaction.editReply({ content: '❌ Invalid Target Channel ID!' });
 
             const embed = new EmbedBuilder()
                 .setTitle(panelTitle)
@@ -167,7 +167,7 @@ const handleInteractions = async (interaction) => {
             }
 
             if (!store.categories || store.categories.length === 0) {
-                return await interaction.editReply({ content: '❌ Categories array empty. Run configurations layout first.' });
+                return await interaction.editReply({ content: '❌ Categories array empty. Run configs first.' });
             }
 
             const catOptions = store.categories.map(cat => ({ label: cat, value: `store_cat_${cat}` }));
@@ -179,7 +179,7 @@ const handleInteractions = async (interaction) => {
             );
 
             await targetChannel.send({ embeds: [embed], components: [row] });
-            return await interaction.editReply({ content: `🚀 **Step 2/3 Complete!** Store panel deployed inside <#${targetChanId}>.` });
+            return await interaction.editReply({ content: `🚀 **Step 2/3 Complete!** Panel deployed inside <#${targetChanId}>.` });
         }
 
         if (interaction.customId === 'modal_store_execution') {
@@ -189,7 +189,7 @@ const handleInteractions = async (interaction) => {
             const mappingsRaw = interaction.fields.getTextInputValue('exe_cmds').split('||').map(m => m.trim());
 
             const store = await GuildStore.findOne({ guildId });
-            if (!store) return await interaction.editReply({ content: '❌ No storefront database file registered.' });
+            if (!store) return await interaction.editReply({ content: '❌ No store configuration found.' });
 
             store.consoleChannelId = consoleChannelId;
 
@@ -205,7 +205,7 @@ const handleInteractions = async (interaction) => {
             });
 
             await store.save();
-            return await interaction.editReply({ content: '⚙️ **Step 3/3 Complete!** Game server console routes matrix mapping active.' });
+            return await interaction.editReply({ content: '⚙️ **Step 3/3 Complete!** Commands matrix active.' });
         }
 
         if (interaction.customId.startsWith('modal_player_checkout_')) {
@@ -288,7 +288,7 @@ const handleInteractions = async (interaction) => {
                     .addOptions(itemOptions)
             );
 
-            return await interaction.reply({ content: `📁 Showing results inside cluster: **${chosenCat}**`, components: [rowItems], ephemeral: true });
+            return await interaction.reply({ content: `📁 Showing results inside category: **${chosenCat}**`, components: [rowItems], ephemeral: true });
         }
 
         if (interaction.customId === 'store_item_select') {
@@ -302,12 +302,12 @@ const handleInteractions = async (interaction) => {
                     .setStyle(ButtonStyle.Primary)
             );
 
-            return await interaction.reply({ content: `🛒 Ready to buy **${targetItem.name}**? Click checkout button below to launch terminal.`, components: [buyRow], ephemeral: true });
+            return await interaction.reply({ content: `🛒 Ready to buy **${targetItem.name}**? Click checkout button below.`, components: [buyRow], ephemeral: true });
         }
     }
 
     // =================================================================
-    // 4. ACTIONS PANEL BUTTONS HANDLER (FIXED FOR DELETE ROOM REMAINING)
+    // 4. ACTIONS PANEL BUTTONS HANDLER (FIXED FOR DELETION PRESERVATION)
     // =================================================================
     if (interaction.isButton()) {
         const store = await GuildStore.findOne({ guildId });
@@ -358,9 +358,8 @@ const handleInteractions = async (interaction) => {
                 }).catch(() => null);
             }
 
-            await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads.` });
+            await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired successfully.` });
             
-            // Kept Delete Room open and active
             const updatedRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
             );
@@ -379,7 +378,6 @@ const handleInteractions = async (interaction) => {
 
             await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified.` });
             
-            // Kept Delete Room open and active
             const updatedRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
             );
@@ -390,4 +388,7 @@ const handleInteractions = async (interaction) => {
             await interaction.reply({ content: '🗑️ Generating secure text logs transcripts... Closing channel permanently in 5 seconds.' });
 
             const textBuffer = [];
-            const collectedMessa
+            const collectedMessages = await interaction.channel.messages.fetch({ limit: 100 });
+            
+            [...collectedMessages.values()].reverse().forEach(msg => {
+                textBuffer.push(`[${msg.createdAt.toLocaleString()}] ${msg.author
