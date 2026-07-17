@@ -15,7 +15,7 @@ const handleInteractions = async (interaction) => {
     // 1. MODAL SUBMISSIONS INTERCEPTOR (ADMIN SETUP)
     // =================================================================
     if (interaction.isModalSubmit()) {
-        // --- MODAL: CONFIGURATIONS (BULK CATEGORY & ITEM PARSER CONNECTED) ---
+        // --- MODAL: CONFIGURATIONS (BULK CATEGORY & ITEM PARSER) ---
         if (interaction.customId === 'modal_store_configs') {
             await interaction.deferReply({ ephemeral: true });
             
@@ -30,7 +30,6 @@ const handleInteractions = async (interaction) => {
             const items = [];
 
             try {
-                // Split distinct category blocks using ||
                 const categoryBlocks = bulkInput.split('||');
 
                 categoryBlocks.forEach(block => {
@@ -44,13 +43,11 @@ const handleInteractions = async (interaction) => {
                         categories.push(categoryName);
                     }
 
-                    // Loop through individual items inside this specific block split
                     itemsRaw.forEach(itemRaw => {
                         const itemParts = itemRaw.split('-');
                         if (itemParts.length < 2) return;
 
                         const itemName = itemParts[0].trim();
-                        // Extract only price numbers digits (strips 'inr', 'rs', etc.)
                         const itemPrice = parseInt(itemParts[1].replace(/[^0-9]/g, ''), 10);
 
                         if (itemName && !isNaN(itemPrice)) {
@@ -58,7 +55,7 @@ const handleInteractions = async (interaction) => {
                                 category: categoryName,
                                 name: itemName,
                                 price: itemPrice,
-                                command: '' // Left blank to be routed via step 3 matrix later
+                                command: '' 
                             });
                         }
                     });
@@ -70,11 +67,11 @@ const handleInteractions = async (interaction) => {
                     { upsert: true, new: true }
                 );
 
-                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Mapped categories and items dynamic split inventory through advanced text parse system.' });
+                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Categories and items dynamic inventory mapped cleanly via text parse system.' });
 
             } catch (parseError) {
                 console.error("Modal Data Parsing Error:", parseError);
-                return await interaction.editReply({ content: '❌ **Parsing Failed!** Item box ke format check karo (Category:item-price || Category2:item-price).' });
+                return await interaction.editReply({ content: '❌ **Parsing Failed!** Item box ka format check karo (Category:item-price || Category2:item-price).' });
             }
         }
 
@@ -107,7 +104,7 @@ const handleInteractions = async (interaction) => {
             }
 
             if (!store.categories || store.categories.length === 0) {
-                return await interaction.editReply({ content: '❌ Base categories array is empty. Please run `/store configurations` first.' });
+                return await interaction.editReply({ content: '❌ Base categories array is empty. Please run configs modal first.' });
             }
 
             const catOptions = store.categories.map(cat => ({ label: cat, value: `store_cat_${cat}` }));
@@ -215,7 +212,7 @@ const handleInteractions = async (interaction) => {
             const filteredItems = store.items.filter(i => i.category === chosenCat);
 
             if (filteredItems.length === 0) {
-                return await interaction.reply({ content: '❌ No active items listed under this structural department yet.', ephemeral: true });
+                return await interaction.reply({ content: '❌ No active items listed under this department yet.', ephemeral: true });
             }
 
             const itemOptions = filteredItems.map(i => ({
@@ -230,7 +227,7 @@ const handleInteractions = async (interaction) => {
                     .addOptions(itemOptions)
             );
 
-            return await interaction.reply({ content: `📁 Showing results inside structural cluster: **${chosenCat}**`, components: [rowItems], ephemeral: true });
+            return await interaction.reply({ content: `📁 Showing results inside cluster: **${chosenCat}**`, components: [rowItems], ephemeral: true });
         }
 
         if (interaction.customId === 'store_item_select') {
@@ -280,6 +277,7 @@ const handleInteractions = async (interaction) => {
             return await interaction.reply({ content: '❌ Unauthorized Access: Operational Staff Clearance Required.', ephemeral: true });
         }
 
+        // --- BUTTON ACTION: APPROVE ORDER ---
         if (interaction.customId === 'btn_order_approve') {
             await interaction.deferReply();
             
@@ -296,28 +294,40 @@ const handleInteractions = async (interaction) => {
             const buyerUser = await interaction.client.users.fetch(ticket.buyerId).catch(() => null);
             if (buyerUser) {
                 await buyerUser.send({
-                    content: `📦 **Order Dispatch Notice [${store.serverName}]:** Hey! Your digital item purchase request for **${ticket.itemName}** has been verified and successfully approved! Check in-game assets directly. Thank you! 🎉`
+                    content: `📦 **Order Dispatch Notice [${store.serverName || 'Store'}]:** Hey! Your digital item purchase request for **${ticket.itemName}** has been verified and successfully approved! Check in-game assets directly. Thank you! 🎉`
                 }).catch(() => null);
             }
 
-            await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads successfully. Channel ready to be deleted.` });
-            return await interaction.message.edit({ components: [] });
+            await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads successfully.` });
+            
+            // Re-render components row to block double actions while preserving Delete Room option
+            const updatedRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
+            );
+            return await interaction.message.edit({ components: [updatedRow] });
         }
 
+        // --- BUTTON ACTION: REJECT ORDER ---
         if (interaction.customId === 'btn_order_reject') {
             await interaction.deferReply();
 
             const buyerUser = await interaction.client.users.fetch(ticket.buyerId).catch(() => null);
             if (buyerUser) {
                 await buyerUser.send({
-                    content: `❌ **Order Rejection Notice [${store.serverName}]:** Hello. Your transaction request asset allocation for **${ticket.itemName}** has been declined by administration staff.`
+                    content: `❌ **Order Rejection Notice [${store.serverName || 'Store'}]:** Hello. Your transaction request asset allocation for **${ticket.itemName}** has been declined by administration staff.`
                 }).catch(() => null);
             }
 
-            await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified. Freezing control deck values.` });
-            return await interaction.message.edit({ components: [] });
+            await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified.` });
+            
+            // Re-render components row to block double actions while preserving Delete Room option
+            const updatedRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
+            );
+            return await interaction.message.edit({ components: [updatedRow] });
         }
 
+        // --- BUTTON ACTION: DELETE ROOM & LOG TRANSCRIPTS ---
         if (interaction.customId === 'btn_order_delete') {
             await interaction.reply({ content: '🗑️ Generating secure text logs transcripts... Closing space arrays permanently in 5 seconds.' });
 
@@ -353,4 +363,4 @@ const handleInteractions = async (interaction) => {
 };
 
 module.exports = { handleInteractions };
-                
+            
