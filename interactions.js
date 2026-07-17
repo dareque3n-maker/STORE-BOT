@@ -23,46 +23,66 @@ const handleInteractions = async (interaction) => {
             const adminRoleId = interaction.fields.getTextInputValue('cfg_role');
             const logsChannelId = interaction.fields.getTextInputValue('cfg_logs');
             
-            // Expected Format: Ranks:frost-100inr, mega-200inr || Keys:common-50inr, mythic-100inr
-            const bulkInput = interaction.fields.getTextInputValue('cfg_items');
+            // Safe parsing setup for items input box
+            let bulkInput = '';
+            try {
+                bulkInput = interaction.fields.getTextInputValue('cfg_items');
+            } catch (e) {
+                console.error("cfg_items field not found, checking fallback fields...");
+            }
             
             const categories = [];
             const items = [];
 
             try {
-                // Split distinct category blocks using ||
-                const categoryBlocks = bulkInput.split('||');
+                if (bulkInput && bulkInput.trim().length > 0) {
+                    // Split distinct category blocks using ||
+                    const categoryBlocks = bulkInput.split('||');
 
-                categoryBlocks.forEach(block => {
-                    const parts = block.split(':');
-                    if (parts.length < 2) return;
+                    categoryBlocks.forEach(block => {
+                        if (!block.includes(':')) return;
+                        const parts = block.split(':');
+                        if (parts.length < 2) return;
 
-                    const categoryName = parts[0].trim();
-                    const itemsRaw = parts[1].split(',');
+                        const categoryName = parts[0].trim();
+                        const itemsRaw = parts[1].split(',');
 
-                    if (!categories.includes(categoryName) && categoryName) {
-                        categories.push(categoryName);
-                    }
-
-                    // Loop through individual items inside this specific block split
-                    itemsRaw.forEach(itemRaw => {
-                        const itemParts = itemRaw.split('-');
-                        if (itemParts.length < 2) return;
-
-                        const itemName = itemParts[0].trim();
-                        // Extract only price numbers digits (strips 'inr', 'rs', etc.)
-                        const itemPrice = parseInt(itemParts[1].replace(/[^0-9]/g, ''), 10);
-
-                        if (itemName && !isNaN(itemPrice)) {
-                            items.push({
-                                category: categoryName,
-                                name: itemName,
-                                price: itemPrice,
-                                command: '' // Left blank to be routed via step 3 matrix later
-                            });
+                        if (!categories.includes(categoryName) && categoryName) {
+                            categories.push(categoryName);
                         }
+
+                        // Loop through individual items inside this specific block split
+                        itemsRaw.forEach(itemRaw => {
+                            if (!itemRaw.includes('-')) return;
+                            const itemParts = itemRaw.split('-');
+                            if (itemParts.length < 2) return;
+
+                            const itemName = itemParts[0].trim();
+                            const itemPrice = parseInt(itemParts[1].replace(/[^0-9]/g, ''), 10);
+
+                            if (itemName && !isNaN(itemPrice)) {
+                                items.push({
+                                    category: categoryName,
+                                    name: itemName,
+                                    price: itemPrice,
+                                    command: '' 
+                                });
+                            }
+                        });
                     });
-                });
+                }
+
+                // Fallback Fix: Dynamic extraction check if categories left empty
+                if (categories.length === 0 && items.length > 0) {
+                    items.forEach(i => {
+                        if (!categories.includes(i.category)) categories.push(i.category);
+                    });
+                }
+
+                // If completely empty due to blank form data
+                if (categories.length === 0) {
+                    categories.push('General');
+                }
 
                 await GuildStore.findOneAndUpdate(
                     { guildId },
@@ -87,7 +107,10 @@ const handleInteractions = async (interaction) => {
             const panelBanner = interaction.fields.getTextInputValue('pnl_banner');
             const targetChanId = interaction.fields.getTextInputValue('pnl_chan');
 
-            const store = await GuildStore.findOneAndUpdate(
+            const store = await GuildStore.findOne({ guildId });
+            
+            // Update visual properties safely on pre-configured storefront model
+            const updatedStore = await GuildStore.findOneAndUpdate(
                 { guildId },
                 { panelTitle, panelDescription, panelBanner },
                 { upsert: true, new: true }
@@ -106,11 +129,11 @@ const handleInteractions = async (interaction) => {
                 embed.setImage(panelBanner);
             }
 
-            if (!store.categories || store.categories.length === 0) {
+            if (!updatedStore.categories || updatedStore.categories.length === 0) {
                 return await interaction.editReply({ content: '❌ Base categories array is empty. Please run `/store configurations` first.' });
             }
 
-            const catOptions = store.categories.map(cat => ({ label: cat, value: `store_cat_${cat}` }));
+            const catOptions = updatedStore.categories.map(cat => ({ label: cat, value: `store_cat_${cat}` }));
             const row = new ActionRowBuilder().addComponents(
                 new StringSelectMenuBuilder()
                     .setCustomId('store_category_select')
@@ -302,7 +325,6 @@ const handleInteractions = async (interaction) => {
 
             await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads successfully. Channel ready to be deleted.` });
             
-            // FIXED: Sirf Delete Room button ko active chhodega, baaki remove karega
             const deleteOnlyRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
             );
@@ -321,7 +343,6 @@ const handleInteractions = async (interaction) => {
 
             await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified. Freezing control deck values.` });
             
-            // FIXED: Sirf Delete Room button ko active chhodega, baaki remove karega
             const deleteOnlyRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
             );
@@ -363,4 +384,4 @@ const handleInteractions = async (interaction) => {
 };
 
 module.exports = { handleInteractions };
-                                               
+                
