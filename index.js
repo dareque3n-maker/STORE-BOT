@@ -7,18 +7,19 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
     ]
 });
 
-// Database Connection Bridge Setup
+// Database Setup
 const mongoURI = process.env.MONGO_URI || process.env.MONGO_URL;
 if (!mongoURI) {
-    console.error('❌ CRITICAL ERROR: Database Connection String missing on Railway!');
+    console.error('❌ CRITICAL ERROR: Database Connection String missing!');
     process.exit(1);
 }
 
-// Clean and Original Admin Slash Commands Layout
+// Fixed Matrix Commands Setup
 const commands = [
     new SlashCommandBuilder()
         .setName('store')
@@ -43,24 +44,21 @@ const commands = [
 client.once('ready', async () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}!`);
     
-    // Auto sync and refresh clean slash commands matrix to Discord API
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('🔄 Cleaning cache and refreshing original execution application (/) commands...');
+        console.log('🔄 Re-syncing clean application (/) commands...');
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: commands },
         );
-        console.log('✅ Application (/) commands successfully re-synchronized globally.');
+        console.log('✅ Commands successfully re-synchronized.');
     } catch (error) {
         console.error('❌ Slash command registration failed:', error);
     }
 });
 
-// Fire Database connection mapping
 connectDB(mongoURI);
 
-// Gateway Interactions Listener
 client.on('interactionCreate', async (interaction) => {
     try {
         await handleInteractions(interaction);
