@@ -116,7 +116,7 @@ const handleInteractions = async (interaction) => {
                     .setCustomId('store_category_select')
                     .setPlaceholder('🗂️ Choose a Store Category...')
                     .addOptions(catOptions)
-                );
+            );
 
             await targetChannel.send({ embeds: [embed], components: [row] });
             return await interaction.editReply({ content: `🚀 **Step 2/3 Complete!** Store panel deployed inside <#${targetChanId}>.` });
@@ -301,12 +301,7 @@ const handleInteractions = async (interaction) => {
             }
 
             await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads successfully. Channel ready to be deleted.` });
-            
-            // Sirf approve/reject gayab karega, Delete Room yahi rehne dega
-            const updatedRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
-            );
-            return await interaction.message.edit({ components: [updatedRow] });
+            return await interaction.message.edit({ components: [] });
         }
 
         if (interaction.customId === 'btn_order_reject') {
@@ -320,12 +315,7 @@ const handleInteractions = async (interaction) => {
             }
 
             await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified. Freezing control deck values.` });
-            
-            // Sirf approve/reject gayab karega, Delete Room yahi rehne dega
-            const updatedRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
-            );
-            return await interaction.message.edit({ components: [updatedRow] });
+            return await interaction.message.edit({ components: [] });
         }
 
         if (interaction.customId === 'btn_order_delete') {
@@ -363,4 +353,4 @@ const handleInteractions = async (interaction) => {
 };
 
 module.exports = { handleInteractions };
-                
+                       
