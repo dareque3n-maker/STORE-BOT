@@ -1,29 +1,93 @@
 const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { GuildStore, OrderTicket } = require('./db');
-const { handleSlashCommands } = require('./commands');
 
 const handleInteractions = async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // Route Slash Commands First
+    // =================================================================
+    // 1. SLASH COMMANDS HANDLER DIRECT CORE ROUTER
+    // =================================================================
     if (interaction.isChatInputCommand()) {
-        return await handleSlashCommands(interaction);
+        const { commandName, options } = interaction;
+        const subCommand = options.getSubcommand(false);
+
+        if (commandName === 'store') {
+            // --- CMD: CONFIGURATIONS POPUP TRIGGER ---
+            if (subCommand === 'configurations') {
+                const configModal = new ModalBuilder()
+                    .setCustomId('modal_store_configs')
+                    .setTitle('Step 1: Base Store Configurations');
+
+                configModal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('cfg_name').setLabel('Server Store Name').setRequired(true).setStyle(TextInputStyle.Short)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('cfg_role').setLabel('Admin Staff Role ID').setRequired(true).setStyle(TextInputStyle.Short)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('cfg_logs').setLabel('Logs Channel ID').setRequired(true).setStyle(TextInputStyle.Short)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('cfg_items').setLabel('Items (Format: Cat:item-price || Cat2:item-price)').setPlaceholder('e.g., Ranks:frost-100inr, mega-200inr || Keys:mythic-50inr').setRequired(true).setStyle(TextInputStyle.Paragraph)
+                    )
+                );
+                return await interaction.showModal(configModal);
+            }
+
+            // --- CMD: PANEL DEPLOY TRIGGER ---
+            if (subCommand === 'panel') {
+                const panelModal = new ModalBuilder()
+                    .setCustomId('modal_store_panel')
+                    .setTitle('Step 2: Embed Panel Deployment');
+
+                panelModal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('pnl_title').setLabel('Embed Panel Title').setRequired(true).setStyle(TextInputStyle.Short)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('pnl_desc').setLabel('Embed Panel Description').setRequired(true).setStyle(TextInputStyle.Paragraph)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('pnl_banner').setLabel('Embed Banner URL (Optional)').setRequired(false).setStyle(TextInputStyle.Short)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('pnl_chan').setLabel('Destination Channel ID').setRequired(true).setStyle(TextInputStyle.Short)
+                    )
+                );
+                return await interaction.showModal(panelModal);
+            }
+
+            // --- CMD: CONSOLE EXECUTION TRIGGER ---
+            if (subCommand === 'execution') {
+                const execModal = new ModalBuilder()
+                    .setCustomId('modal_store_execution')
+                    .setTitle('Step 3: Console Commands Mapping');
+
+                execModal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('exe_console').setLabel('Game Console Channel ID').setRequired(true).setStyle(TextInputStyle.Short)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder().setCustomId('exe_cmds').setLabel('Command Rules (Format: item:cmd || item2:cmd)').setPlaceholder('e.g., frost:give {name} frost 1 || mythic:key give {name} mythic 1').setRequired(true).setStyle(TextInputStyle.Paragraph)
+                    )
+                );
+                return await interaction.showModal(execModal);
+            }
+        }
     }
 
     // =================================================================
-    // 1. MODAL SUBMISSIONS INTERCEPTOR (ADMIN SETUP)
+    // 2. MODAL SUBMISSIONS INTERCEPTOR (DATA PROCESSING)
     // =================================================================
     if (interaction.isModalSubmit()) {
-        // --- MODAL: CONFIGURATIONS (BULK CATEGORY & ITEM PARSER) ---
         if (interaction.customId === 'modal_store_configs') {
             await interaction.deferReply({ ephemeral: true });
             
             const serverName = interaction.fields.getTextInputValue('cfg_name');
             const adminRoleId = interaction.fields.getTextInputValue('cfg_role');
             const logsChannelId = interaction.fields.getTextInputValue('cfg_logs');
-            
-            // Expected Format: Ranks:frost-100inr, mega-200inr || Keys:common-50inr, mythic-100inr
             const bulkInput = interaction.fields.getTextInputValue('cfg_items');
             
             const categories = [];
@@ -67,15 +131,14 @@ const handleInteractions = async (interaction) => {
                     { upsert: true, new: true }
                 );
 
-                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Categories and items dynamic inventory mapped cleanly via text parse system.' });
+                return await interaction.editReply({ content: '✅ **Step 1/3 Complete!** Categories and items configurations successfully parse updated into DB.' });
 
             } catch (parseError) {
-                console.error("Modal Data Parsing Error:", parseError);
-                return await interaction.editReply({ content: '❌ **Parsing Failed!** Item box ka format check karo (Category:item-price || Category2:item-price).' });
+                console.error(parseError);
+                return await interaction.editReply({ content: '❌ **Parsing Failed!** Form input details strictly check karo.' });
             }
         }
 
-        // --- MODAL: PANEL VISUAL DEPLOYMENT ---
         if (interaction.customId === 'modal_store_panel') {
             await interaction.deferReply({ ephemeral: true });
 
@@ -91,7 +154,7 @@ const handleInteractions = async (interaction) => {
             );
 
             const targetChannel = interaction.guild.channels.cache.get(targetChanId);
-            if (!targetChannel) return await interaction.editReply({ content: '❌ Invalid Destination Target Channel ID provided!' });
+            if (!targetChannel) return await interaction.editReply({ content: '❌ Invalid Destination Target Channel ID!' });
 
             const embed = new EmbedBuilder()
                 .setTitle(panelTitle)
@@ -104,7 +167,7 @@ const handleInteractions = async (interaction) => {
             }
 
             if (!store.categories || store.categories.length === 0) {
-                return await interaction.editReply({ content: '❌ Base categories array is empty. Please run configs modal first.' });
+                return await interaction.editReply({ content: '❌ Categories array empty. Run configurations layout first.' });
             }
 
             const catOptions = store.categories.map(cat => ({ label: cat, value: `store_cat_${cat}` }));
@@ -119,7 +182,6 @@ const handleInteractions = async (interaction) => {
             return await interaction.editReply({ content: `🚀 **Step 2/3 Complete!** Store panel deployed inside <#${targetChanId}>.` });
         }
 
-        // --- MODAL: EXECUTION ENGINE ROUTING ---
         if (interaction.customId === 'modal_store_execution') {
             await interaction.deferReply({ ephemeral: true });
 
@@ -127,7 +189,7 @@ const handleInteractions = async (interaction) => {
             const mappingsRaw = interaction.fields.getTextInputValue('exe_cmds').split('||').map(m => m.trim());
 
             const store = await GuildStore.findOne({ guildId });
-            if (!store) return await interaction.editReply({ content: '❌ No storefront database file registered for this server. Run configs first.' });
+            if (!store) return await interaction.editReply({ content: '❌ No storefront database file registered.' });
 
             store.consoleChannelId = consoleChannelId;
 
@@ -143,10 +205,9 @@ const handleInteractions = async (interaction) => {
             });
 
             await store.save();
-            return await interaction.editReply({ content: '⚙️ **Step 3/3 Complete!** Game server console routes and command mapping matrices are now active.' });
+            return await interaction.editReply({ content: '⚙️ **Step 3/3 Complete!** Game server console routes matrix mapping active.' });
         }
 
-        // --- MODAL: PLAYER IN-GAME NAME CAPTURE ---
         if (interaction.customId.startsWith('modal_player_checkout_')) {
             await interaction.deferReply({ ephemeral: true });
             const itemUniqueId = interaction.customId.replace('modal_player_checkout_', '');
@@ -155,7 +216,7 @@ const handleInteractions = async (interaction) => {
             const store = await GuildStore.findOne({ guildId });
             const item = store?.items.find(i => i._id.toString() === itemUniqueId);
 
-            if (!item) return await interaction.editReply({ content: '❌ Core system error: Selected asset package expired or deleted.' });
+            if (!item) return await interaction.editReply({ content: '❌ Asset package expired or deleted.' });
 
             const ticketRoom = await interaction.guild.channels.create({
                 name: `order-${interaction.user.username}`,
@@ -196,12 +257,12 @@ const handleInteractions = async (interaction) => {
             );
 
             await ticketRoom.send({ content: `${interaction.user} | <@&${store.adminRoleId}>`, embeds: [embed], components: [controlRow] });
-            return await interaction.editReply({ content: `🎯 Checkout room generated! Complete details inside operational workspace channel: ${ticketRoom}` });
+            return await interaction.editReply({ content: `🎯 Checkout room generated: ${ticketRoom}` });
         }
     }
 
     // =================================================================
-    // 2. DROP-DOWN SELECT MENUS MANAGER (DYNAMIC LAYOUT ENGINE)
+    // 3. DROP-DOWN SELECT MENUS MANAGER
     // =================================================================
     if (interaction.isStringSelectMenu()) {
         const store = await GuildStore.findOne({ guildId });
@@ -246,7 +307,7 @@ const handleInteractions = async (interaction) => {
     }
 
     // =================================================================
-    // 3. ACTIONS PANEL BUTTONS HANDLER (APPROVAL & AUTOMATION ENGINE)
+    // 4. ACTIONS PANEL BUTTONS HANDLER (FIXED FOR DELETE ROOM REMAINING)
     // =================================================================
     if (interaction.isButton()) {
         const store = await GuildStore.findOne({ guildId });
@@ -274,10 +335,9 @@ const handleInteractions = async (interaction) => {
         if (!ticket) return;
 
         if (store.adminRoleId && !interaction.member.roles.cache.has(store.adminRoleId) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return await interaction.reply({ content: '❌ Unauthorized Access: Operational Staff Clearance Required.', ephemeral: true });
+            return await interaction.reply({ content: '❌ Unauthorized Staff Clearance Required.', ephemeral: true });
         }
 
-        // --- BUTTON ACTION: APPROVE ORDER ---
         if (interaction.customId === 'btn_order_approve') {
             await interaction.deferReply();
             
@@ -294,73 +354,40 @@ const handleInteractions = async (interaction) => {
             const buyerUser = await interaction.client.users.fetch(ticket.buyerId).catch(() => null);
             if (buyerUser) {
                 await buyerUser.send({
-                    content: `📦 **Order Dispatch Notice [${store.serverName || 'Store'}]:** Hey! Your digital item purchase request for **${ticket.itemName}** has been verified and successfully approved! Check in-game assets directly. Thank you! 🎉`
+                    content: `📦 **Order Dispatch Notice [${store.serverName || 'Store'}]:** Hey! Your digital item purchase request for **${ticket.itemName}** has been verified and successfully approved! 🎉`
                 }).catch(() => null);
             }
 
-            await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads successfully.` });
+            await interaction.editReply({ content: `✅ **Order Approved!** Automation scripts fired command payloads.` });
             
-            // Re-render components row to block double actions while preserving Delete Room option
+            // Kept Delete Room open and active
             const updatedRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
             );
             return await interaction.message.edit({ components: [updatedRow] });
         }
 
-        // --- BUTTON ACTION: REJECT ORDER ---
         if (interaction.customId === 'btn_order_reject') {
             await interaction.deferReply();
 
             const buyerUser = await interaction.client.users.fetch(ticket.buyerId).catch(() => null);
             if (buyerUser) {
                 await buyerUser.send({
-                    content: `❌ **Order Rejection Notice [${store.serverName || 'Store'}]:** Hello. Your transaction request asset allocation for **${ticket.itemName}** has been declined by administration staff.`
+                    content: `❌ **Order Rejection Notice [${store.serverName || 'Store'}]:** Hello. Your transaction request asset allocation for **${ticket.itemName}** has been declined.`
                 }).catch(() => null);
             }
 
             await interaction.editReply({ content: `🚫 **Order Rejected.** Buyer user notified.` });
             
-            // Re-render components row to block double actions while preserving Delete Room option
+            // Kept Delete Room open and active
             const updatedRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('btn_order_delete').setLabel('Delete Room').setStyle(ButtonStyle.Secondary)
             );
             return await interaction.message.edit({ components: [updatedRow] });
         }
 
-        // --- BUTTON ACTION: DELETE ROOM & LOG TRANSCRIPTS ---
         if (interaction.customId === 'btn_order_delete') {
-            await interaction.reply({ content: '🗑️ Generating secure text logs transcripts... Closing space arrays permanently in 5 seconds.' });
+            await interaction.reply({ content: '🗑️ Generating secure text logs transcripts... Closing channel permanently in 5 seconds.' });
 
             const textBuffer = [];
-            const collectedMessages = await interaction.channel.messages.fetch({ limit: 100 });
-            
-            [...collectedMessages.values()].reverse().forEach(msg => {
-                textBuffer.push(`[${msg.createdAt.toLocaleString()}] ${msg.author.tag}: ${msg.content}`);
-            });
-
-            const logAttachment = new AttachmentBuilder(Buffer.from(textBuffer.join('\n'), 'utf-8'), { name: `transcript-${interaction.channel.name}.txt` });
-
-            if (store.logsChannelId) {
-                const loggingChannel = interaction.guild.channels.cache.get(store.logsChannelId);
-                if (loggingChannel) {
-                    const trackingEmbed = new EmbedBuilder()
-                        .setTitle('📊 ORDER WORKSPACE ARCHIVED LOGS')
-                        .setColor('#36393F')
-                        .addFields(
-                            { name: 'Room Name', value: `\`${interaction.channel.name}\``, inline: true },
-                            { name: 'Purchased Pack', value: `${ticket.itemName}`, inline: true },
-                            { name: 'IGN', value: `\`${ticket.buyerIGN}\``, inline: true }
-                        )
-                        .setTimestamp();
-                    await loggingChannel.send({ embeds: [trackingEmbed], files: [logAttachment] }).catch(() => null);
-                }
-            }
-
-            await OrderTicket.deleteOne({ channelId: interaction.channel.id });
-            setTimeout(() => interaction.channel.delete().catch(() => null), 5000);
-        }
-    }
-};
-
-module.exports = { handleInteractions };
-            
+            const collectedMessa
