@@ -7,18 +7,18 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages // User DMs ke liye active rakha hai
+        GatewayIntentBits.MessageContent
     ]
 });
 
+// Database Connection Bridge Setup
 const mongoURI = process.env.MONGO_URI || process.env.MONGO_URL;
 if (!mongoURI) {
-    console.error('❌ CRITICAL ERROR: Database Connection String missing!');
+    console.error('❌ CRITICAL ERROR: Database Connection String missing on Railway!');
     process.exit(1);
 }
 
-// Ye structure zaroori hai taaki naye servers ko commands mil sakein
+// Clean and Original Admin Slash Commands Layout
 const commands = [
     new SlashCommandBuilder()
         .setName('store')
@@ -43,29 +43,29 @@ const commands = [
 client.once('ready', async () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}!`);
     
-    // Naye servers me commands automatic pohanchane ke liye Global Registration
+    // Auto sync and refresh clean slash commands matrix to Discord API
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('🔄 Synchronizing global store application (/) commands...');
+        console.log('🔄 Cleaning cache and refreshing original execution application (/) commands...');
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: commands },
         );
-        console.log('✅ Global commands updated! Ab ye har server me kaam karega.');
+        console.log('✅ Application (/) commands successfully re-synchronized globally.');
     } catch (error) {
         console.error('❌ Slash command registration failed:', error);
     }
 });
 
-// Database trigger connection
+// Fire Database connection mapping
 connectDB(mongoURI);
 
-// Gateway Interactions listener
+// Gateway Interactions Listener
 client.on('interactionCreate', async (interaction) => {
     try {
         await handleInteractions(interaction);
     } catch (err) {
-        console.error('Interaction gateway exception:', err);
+        console.error('Interaction gateway runtime exception:', err);
     }
 });
 
