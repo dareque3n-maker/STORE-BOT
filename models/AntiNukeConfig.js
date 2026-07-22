@@ -6,11 +6,13 @@ const AntiNukeSchema = new mongoose.Schema({
     logChannelId: { type: String, default: null },
     whitelistedUsers: { type: [String], default: [] },
     
-    // Backup Storage (Max 5 retained)
-    backups: [{
+    // Emergency Triggered Snapshot & Transcript (Auto-delete after 10 mins)
+    emergencyBackups: [{
         backupId: String,
-        timestamp: { type: Date, default: Date.now },
-        data: Object // Channels, Roles, Permissions structure
+        createdAt: { type: Date, default: Date.now, expires: 600 }, // 600 seconds = 10 minutes
+        deletedChannelName: String,
+        transcript: String,
+        channelData: Object
     }]
 });
 
