@@ -8,129 +8,203 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.MessageContent
     ]
 });
 
-// Action Tracker Memory Map (User_Id -> Timestamp Array)
 const actionTrackers = new Map();
+const spamTracker = new Map();
 
-// Helper to Check & Enforce Rate Limits
-async function processNukeAction(guild, executorId, actionType, maxLimit, reason) {
-    if (executorId === client.user.id || executorId === guild.ownerId) return; // Ignore Bot & Owner
+// ================= 1. AUTOMATED BACKUP ENGINE (Every 2 Mins) =================
+async function takeServerBackup(guild) {
+    try {
+        const roles = guild.roles.cache
+            .filter(r => !r.managed && r.id !== guild.id)
+            .map(r => ({
+                name: r.name,
+                color: r.hexColor,
+                permissions: r.permissions.bitfield.toString(),
+                hoist: r.hoist,
+                position: r.position
+            }));
 
-    const config = await AntiNukeConfig.findOne({ guildId: guild.id });
-    if (!config || !config.enabled) return;
+        const channels = guild.channels.cache.map(c => ({
+            name: c.name,
+            type: c.type,
+            parentId: c.parent ? c.parent.name : null,
+            position: c.position,
+            permissionOverwrites: c.permissionOverwrites.cache.map(p => ({
+                id: p.id,
+                type: p.type,
+                allow: p.allow.bitfield.toString(),
+                deny: p.deny.bitfield.toString()
+            }))
+        }));
 
-    // Check Whitelist
-    if (config.whitelistedUsers.includes(executorId)) return;
+        const backupData = { roles, channels };
+        const backupId = 'bk_' + Date.now();
 
-    const now = Date.now();
-    const trackerKey = `${guild.id}_${executorId}_${actionType}`;
-    const timestamps = actionTrackers.get(trackerKey) || [];
+        let config = await AntiNukeConfig.findOne({ guildId: guild.id });
+        if (!config) config = new AntiNukeConfig({ guildId: guild.id });
 
-    // Keep timestamps from the last 10 seconds only
-    const validTimestamps = timestamps.filter(t => now - t < 10000);
-    validTimestamps.push(now);
-    actionTrackers.set(trackerKey, validTimestamps);
+        config.backups.push({ backupId, timestamp: new Date(), data: backupData });
 
-    // If Threshold Exceeded -> PUNISHMENT TRIGGERED!
-    if (validTimestamps.length >= (config[maxLimit] || 2)) {
-        actionTrackers.delete(trackerKey); // Reset Tracker
-
-        const member = await guild.members.fetch(executorId).catch(() => null);
-        if (!member || !member.bannable) return;
-
-        // 1. Strip All Roles Immediately
-        await member.roles.set([]).catch(() => null);
-
-        // 2. Ban the Nuker
-        await member.ban({ reason: `🚨 Anti-Nuke Triggered: Mass ${reason}` }).catch(() => null);
-
-        // 3. Send Alert Log
-        if (config.logChannelId) {
-            const logChan = guild.channels.cache.get(config.logChannelId);
-            if (logChan) {
-                const embed = new EmbedBuilder()
-                    .setTitle('🚨 ANTI-NUKE SYSTEM TRIGGERED!')
-                    .setDescription(`\`\`\`text\n⚠️ NUKER NEUTRALIZED\n--------------------\nUser    : ${member.user.tag} (${member.id})\nReason  : Mass ${reason} limit exceeded!\nAction  : Roles Stripped & Banned Permanently.\n\`\`\``)
-                    .setColor('#FF0000')
-                    .setTimestamp();
-                await logChan.send({ embeds: [embed] }).catch(() => null);
-            }
+        // Keep only last 5 backups to avoid clutter/load
+        if (config.backups.length > 5) {
+            config.backups.shift(); 
         }
+
+        await config.save();
+    } catch (e) {
+        console.error('Backup error:', e);
     }
 }
 
+// Background loop for 2 min backups
+setInterval(() => {
+    client.guilds.cache.forEach(guild => takeServerBackup(guild));
+}, 2 * 60 * 1000);
+
+
+// ================= 2. NUKE & SPAM PROTECTION CORE =================
+async function triggerNukeDefense(guild, executorId, reason) {
+    if (executorId === client.user.id || executorId === guild.ownerId) return;
+
+    const config = await AntiNukeConfig.findOne({ guildId: guild.id });
+    if (!config || !config.enabled || config.whitelistedUsers.includes(executorId)) return;
+
+    const member = await guild.members.fetch(executorId).catch(() => null);
+    if (!member || !member.bannable) return;
+
+    // Neutralize Nuker instantly
+    await member.roles.set([]).catch(() => null);
+    await member.ban({ reason: `🚨 Anti-Nuke: ${reason}` }).catch(() => null);
+
+    // Get latest backup for recovery
+    const latestBackup = config.backups[config.backups.length - 1];
+    const recoveryCode = latestBackup ? latestBackup.backupId : 'No Backup Found';
+
+    const embed = new EmbedBuilder()
+        .setTitle('🚨 SERVER UNDER ATTACK - NUKER NEUTRALIZED!')
+        .setDescription(`\`\`\`text\nNuker   : ${member.user.tag}\nAction  : ${reason}\nStatus  : Banned & Roles Stripped\nRecovery ID : ${recoveryCode}\n\`\`\`\n⚠️ Server Owner can use \`/restore id:${recoveryCode}\` to roll back changes!`)
+        .setColor('#FF0000')
+        .setTimestamp();
+
+    // Send to Logs Channel
+    if (config.logChannelId) {
+        const logChan = guild.channels.cache.get(config.logChannelId);
+        if (logChan) await logChan.send({ embeds: [embed] }).catch(() => null);
+    }
+
+    // Send direct DM to Server Owner
+    const owner = await guild.fetchOwner().catch(() => null);
+    if (owner) {
+        await owner.send({ embeds: [embed] }).catch(() => null);
+    }
+}
+
+
+// ================= EVENT LISTENERS =================
+
+// Channel Delete Protection
+client.on('channelDelete', async (channel) => {
+    const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
+    const entry = audit?.entries.first();
+    if (entry?.executor) await triggerNukeDefense(channel.guild, entry.executor.id, 'Mass Channel Deletion');
+});
+
+// Role Delete Protection
+client.on('roleDelete', async (role) => {
+    const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
+    const entry = audit?.entries.first();
+    if (entry?.executor) await triggerNukeDefense(role.guild, entry.executor.id, 'Role Deletion');
+});
+
+// Chat Spam Detection
+client.on('messageCreate', async (message) => {
+    if (!message.guild || message.author.bot) return;
+    const now = Date.now();
+    const key = `${message.guild.id}_${message.author.id}`;
+    const userSpam = spamTracker.get(key) || [];
+    
+    const valid = userSpam.filter(t => now - t < 5000); // 5 sec window
+    valid.push(now);
+    spamTracker.set(key, valid);
+
+    if (valid.length >= 6) { // 6 messages in 5 seconds = Spam Nuke
+        spamTracker.delete(key);
+        await triggerNukeDefense(message.guild, message.author.id, 'Chat Spam Flooding');
+    }
+});
+
+
+// ================= SLASH COMMANDS =================
 client.once('ready', async () => {
-    console.log(`🛡️ Anti-Nuke Engine active as ${client.user.tag}`);
+    console.log(`🛡️ Ultimate Anti-Nuke & Backup Bot active as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
 
-    // Register Commands
     const commands = [
-        new SlashCommandBuilder().setName('antinuke').setDescription('Anti-nuke configuration')
-            .addSubcommand(s => s.setName('setup').setDescription('Set log channel').addChannelOption(c => c.setName('channel').setDescription('Log channel').setRequired(true)))
-            .addSubcommand(s => s.setName('whitelist').setDescription('Whitelist user').addUserOption(u => u.setName('user').setDescription('Target user').setRequired(true)))
+        new SlashCommandBuilder().setName('antinuke').setDescription('Anti-nuke config')
+            .addSubcommand(s => s.setName('setup').setDescription('Setup log channel').addChannelOption(c => c.setName('channel').setDescription('Logs channel').setRequired(true))),
+        
+        new SlashCommandBuilder().setName('restore').setDescription('Restore server from backup (Owner Only)')
+            .addStringOption(o => o.setName('id').setDescription('Backup ID sent to DM/Logs').setRequired(true))
     ].map(c => c.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
 });
 
-// ================= ANTI-CHANNEL DELETE =================
-client.on('channelDelete', async (channel) => {
-    try {
-        const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
-        const entry = audit?.entries.first();
-        if (entry && entry.executor) {
-            await processNukeAction(channel.guild, entry.executor.id, 'channelDelete', 'maxChannelDelete', 'Channel Deletion');
-        }
-    } catch (e) { console.error(e); }
-});
-
-// ================= ANTI-ROLE DELETE =================
-client.on('roleDelete', async (role) => {
-    try {
-        const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
-        const entry = audit?.entries.first();
-        if (entry && entry.executor) {
-            await processNukeAction(role.guild, entry.executor.id, 'roleDelete', 'maxRoleDelete', 'Role Deletion');
-        }
-    } catch (e) { console.error(e); }
-});
-
-// ================= ANTI-MASS BAN =================
-client.on('guildBanAdd', async (ban) => {
-    try {
-        const audit = await ban.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberBanAdd }).catch(() => null);
-        const entry = audit?.entries.first();
-        if (entry && entry.executor) {
-            await processNukeAction(ban.guild, entry.executor.id, 'memberBan', 'maxBans', 'Member Ban');
-        }
-    } catch (e) { console.error(e); }
-});
-
-// ================= COMMAND INTERACTION =================
 client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand() || interaction.commandName !== 'antinuke') return;
+    if (!interaction.isChatInputCommand()) return;
+
+    // Only Server Owner check for critical commands
     if (interaction.user.id !== interaction.guild.ownerId) {
-        return await interaction.reply({ content: '❌ Only Server Owner can manage Anti-Nuke settings!', ephemeral: true });
+        return await interaction.reply({ content: '❌ Only the **Server Owner** can use this command!', ephemeral: true });
     }
 
-    const sub = interaction.options.getSubcommand();
-    const guildId = interaction.guild.id;
-
-    if (sub === 'setup') {
+    if (interaction.commandName === 'antinuke') {
         const chan = interaction.options.getChannel('channel');
-        await AntiNukeConfig.findOneAndUpdate({ guildId }, { logChannelId: chan.id }, { upsert: true });
-        return await interaction.reply({ content: `✅ Anti-Nuke Logs configured in ${chan}` });
+        await AntiNukeConfig.findOneAndUpdate({ guildId: interaction.guild.id }, { logChannelId: chan.id }, { upsert: true });
+        return await interaction.reply({ content: `✅ Anti-Nuke Log channel set to ${chan}` });
     }
 
-    if (sub === 'whitelist') {
-        const target = interaction.options.getUser('user');
-        await AntiNukeConfig.findOneAndUpdate({ guildId }, { $addToSet: { whitelistedUsers: target.id } }, { upsert: true });
-        return await interaction.reply({ content: `🛡️ **${target.tag}** added to Anti-Nuke Whitelist!` });
+    if (interaction.commandName === 'restore') {
+        await interaction.deferReply({ ephemeral: true });
+        const backupId = interaction.options.getString('id');
+        const config = await AntiNukeConfig.findOne({ guildId: interaction.guild.id });
+        
+        const targetBackup = config?.backups.find(b => b.backupId === backupId);
+        if (!targetBackup) {
+            return await interaction.editReply({ content: '❌ Invalid Backup ID or backup expired!' });
+        }
+
+        await interaction.editReply({ content: '🔄 Restoring server roles and channels from backup...' });
+
+        // Recreating Roles
+        for (const rData of targetBackup.data.roles) {
+            await interaction.guild.roles.create({
+                name: rData.name,
+                color: rData.color,
+                permissions: rData.permissions,
+                hoist: rData.hoist
+            }).catch(() => null);
+        }
+
+        // Recreating Channels
+        for (const cData of targetBackup.data.channels) {
+            if (cData.type === 0 || cData.type === 2) { // Text or Voice
+                await interaction.guild.channels.create({
+                    name: cData.name,
+                    type: cData.type
+                }).catch(() => null);
+            }
+        }
+
+        return await interaction.followUp({ content: '✅ Server successfully restored from backup state!' });
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
+        
