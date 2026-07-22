@@ -14,7 +14,6 @@ const client = new Client({
 });
 
 const instantDeleteTracker = new Map();
-const roleDeleteTracker = new Map();
 
 // ================= ROLLING BACKUP ENGINE =================
 async function takeRollingBackup(guild) {
@@ -45,17 +44,18 @@ async function takeRollingBackup(guild) {
         if (!config.backups) config.backups = [];
         config.backups.push({ backupId, timestamp: new Date(), data: backupData });
 
-        if (config.backups.length > 3) {
+        if (config.backups.length > 5) {
             config.backups.shift();
         }
 
         await config.save();
+        return backupId;
     } catch (e) {
         console.error('Rolling backup error:', e);
+        return null;
     }
 }
 
-// Every 30 seconds rolling backup
 setInterval(() => {
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 }, 30 * 1000);
@@ -93,19 +93,16 @@ client.on('channelDelete', async (channel) => {
                 await member.ban({ reason: `🚨 Anti-Nuke: Mass Channel Deletion Speed Trigger` }).catch(() => null);
             }
 
-            // Agar rolling backup nahi mila, toh turant ek emergency snapshot le lo taaki 'No_Backup' kabhi na aaye!
-            let latestBackup = config.backups && config.backups.length > 0 ? config.backups[config.backups.length - 1] : null;
-            if (!latestBackup) {
-                await takeRollingBackup(channel.guild);
-                const updatedConfig = await AntiNukeConfig.findOne({ guildId: guildId });
-                latestBackup = updatedConfig?.backups?.pop();
-            }
-            const emergencyId = latestBackup ? latestBackup.backupId : 'roll_' + Date.now();
+            const freshBackupId = await takeRollingBackup(channel.guild);
+            
+            const updatedConfig = await AntiNukeConfig.findOne({ guildId: guildId });
+            const latestBackup = updatedConfig?.backups?.slice(-1)[0];
+            const emergencyId = freshBackupId || (latestBackup ? latestBackup.backupId : 'roll_' + Date.now());
 
-            // Strict Inline Code Format as requested: `/restore id:...`
+            // EXACT DOUBLE BACKTICKS FORMAT: ``/restore id:...``
             const embed = new EmbedBuilder()
                 .setTitle('🚨 LIGHTNING FAST ANTI-NUKE TRIGGERED!')
-                .setDescription('```text\nNuker   : ' + entry.executor.tag + '\nAction  : Mass Channel Deletion\nStatus  : Banned & Neutralized\n```\n**👇 Copy & Paste this restore command:**\n`/restore id:' + emergencyId + '`')
+                .setDescription('```text\nNuker   : ' + entry.executor.tag + '\nAction  : Mass Channel Deletion\nStatus  : Banned & Neutralized\n```\n**👇 Copy & Paste this restore command:**\n``' + `/restore id:${emergencyId}` + '``')
                 .setColor('#FF0000')
                 .setTimestamp();
 
@@ -130,7 +127,6 @@ client.once('ready', async () => {
     console.log(`🛡️ Rolling-Buffer Anti-Nuke Bot Active as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
 
-    // Bot start hote hi sabhi guilds ka turant ek backup le lo taaki zero delay ho
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 
     const commands = [
@@ -207,4 +203,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-                                                            
+            
