@@ -36,7 +36,7 @@ async function takeRollingBackup(guild) {
         }));
 
         const backupData = { roles, channels };
-        const backupId = 'roll_' + Date.now();
+        const backupId = 'emg_' + Date.now(); // Unique Emergency ID
 
         let config = await AntiNukeConfig.findOne({ guildId: guild.id });
         if (!config) config = new AntiNukeConfig({ guildId: guild.id });
@@ -44,18 +44,20 @@ async function takeRollingBackup(guild) {
         if (!config.backups) config.backups = [];
         config.backups.push({ backupId, timestamp: new Date(), data: backupData });
 
-        if (config.backups.length > 5) {
+        // Keep last 10 backups safe so they never expire instantly
+        if (config.backups.length > 10) {
             config.backups.shift();
         }
 
         await config.save();
         return backupId;
     } catch (e) {
-        console.error('Rolling backup error:', e);
+        console.error('Backup error:', e);
         return null;
     }
 }
 
+// Every 30 seconds regular rolling backup
 setInterval(() => {
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 }, 30 * 1000);
@@ -93,13 +95,9 @@ client.on('channelDelete', async (channel) => {
                 await member.ban({ reason: `🚨 Anti-Nuke: Mass Channel Deletion Speed Trigger` }).catch(() => null);
             }
 
-            const freshBackupId = await takeRollingBackup(channel.guild);
-            
-            const updatedConfig = await AntiNukeConfig.findOne({ guildId: guildId });
-            const latestBackup = updatedConfig?.backups?.slice(-1)[0];
-            const emergencyId = freshBackupId || (latestBackup ? latestBackup.backupId : 'roll_' + Date.now());
+            // Nuke detect hote hi turant ek fresh permanent emergency backup lo!
+            const emergencyId = await takeRollingBackup(channel.guild);
 
-            // EXACT DOUBLE BACKTICKS FORMAT: ``/restore id:...``
             const embed = new EmbedBuilder()
                 .setTitle('🚨 LIGHTNING FAST ANTI-NUKE TRIGGERED!')
                 .setDescription('```text\nNuker   : ' + entry.executor.tag + '\nAction  : Mass Channel Deletion\nStatus  : Banned & Neutralized\n```\n**👇 Copy & Paste this restore command:**\n``' + `/restore id:${emergencyId}` + '``')
@@ -124,7 +122,7 @@ client.on('channelDelete', async (channel) => {
 
 // ================= SLASH COMMANDS =================
 client.once('ready', async () => {
-    console.log(`🛡️ Rolling-Buffer Anti-Nuke Bot Active as ${client.user.tag}`);
+    console.log(`🛡️ Anti-Nuke Bot Active as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
 
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
@@ -163,10 +161,10 @@ client.on('interactionCreate', async (interaction) => {
         
         const targetBackup = config?.backups?.find(b => b.backupId === backupId);
         if (!targetBackup) {
-            return await interaction.editReply({ content: '❌ Invalid Backup ID or expired!' });
+            return await interaction.editReply({ content: '❌ Invalid Backup ID! Make sure you copied the latest ID.' });
         }
 
-        await interaction.editReply({ content: `🔄 Restoring server structure from pre-nuke snapshot...` });
+        await interaction.editReply({ content: `🔄 Restoring server structure from snapshot...` });
 
         const categoryMap = new Map();
         const channelData = targetBackup.data.channels;
@@ -203,4 +201,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-            
+                      
