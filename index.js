@@ -29,9 +29,10 @@ async function takeServerBackup(guild) {
                 position: r.position
             }));
 
+        // Categories, Text, aur Voice channels sabka data parent name ke sath save hoga
         const channels = guild.channels.cache.map(c => ({
             name: c.name,
-            type: c.type,
+            type: c.type, // 4 = Category, 0 = Text, 2 = Voice
             parentId: c.parent ? c.parent.name : null,
             position: c.position,
             permissionOverwrites: c.permissionOverwrites.cache.map(p => ({
@@ -107,18 +108,22 @@ async function triggerNukeDefense(guild, executorId, reason) {
 
 // ================= EVENT LISTENERS =================
 
-// Channel Delete Protection
+// Channel Delete Protection (with small delay for audit logs)
 client.on('channelDelete', async (channel) => {
-    const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
-    const entry = audit?.entries.first();
-    if (entry?.executor) await triggerNukeDefense(channel.guild, entry.executor.id, 'Mass Channel Deletion');
+    setTimeout(async () => {
+        const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
+        const entry = audit?.entries.first();
+        if (entry?.executor) await triggerNukeDefense(channel.guild, entry.executor.id, 'Mass Channel Deletion');
+    }, 600);
 });
 
 // Role Delete Protection
 client.on('roleDelete', async (role) => {
-    const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
-    const entry = audit?.entries.first();
-    if (entry?.executor) await triggerNukeDefense(role.guild, entry.executor.id, 'Role Deletion');
+    setTimeout(async () => {
+        const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
+        const entry = audit?.entries.first();
+        if (entry?.executor) await triggerNukeDefense(role.guild, entry.executor.id, 'Role Deletion');
+    }, 600);
 });
 
 // Chat Spam Detection
@@ -180,9 +185,9 @@ client.on('interactionCreate', async (interaction) => {
             return await interaction.editReply({ content: '❌ Invalid Backup ID or backup expired!' });
         }
 
-        await interaction.editReply({ content: '🔄 Restoring server roles and channels from backup...' });
+        await interaction.editReply({ content: '🔄 Restoring server roles, categories and channels from backup...' });
 
-        // Recreating Roles
+        // 1. Recreating Roles
         for (const rData of targetBackup.data.roles) {
             await interaction.guild.roles.create({
                 name: rData.name,
@@ -192,19 +197,36 @@ client.on('interactionCreate', async (interaction) => {
             }).catch(() => null);
         }
 
-        // Recreating Channels
-        for (const cData of targetBackup.data.channels) {
-            if (cData.type === 0 || cData.type === 2) { // Text or Voice
-                await interaction.guild.channels.create({
-                    name: cData.name,
-                    type: cData.type
-                }).catch(() => null);
-            }
+        // 2. Recreating Categories First (Type 4)
+        const categoryMap = new Map();
+        for (const cData of targetBackup.data.channels.filter(c => c.type === 4)) {
+            const createdCat = await interaction.guild.channels.create({
+                name: cData.name,
+                type: 4,
+                position: cData.position
+            }).catch(() => null);
+            
+            if (createdCat) categoryMap.set(cData.name, createdCat.id);
         }
 
-        return await interaction.followUp({ content: '✅ Server successfully restored from backup state!' });
+        // 3. Recreating Text & Voice Channels and linking them to their Categories
+        for (const cData of targetBackup.data.channels.filter(c => c.type !== 4)) {
+            let parentId = null;
+            if (cData.parentId && categoryMap.has(cData.parentId)) {
+                parentId = categoryMap.get(cData.parentId);
+            }
+
+            await interaction.guild.channels.create({
+                name: cData.name,
+                type: cData.type,
+                parent: parentId,
+                position: c.position
+            }).catch(() => null);
+        }
+
+        return await interaction.followUp({ content: '✅ Server successfully restored with proper categories and channels!' });
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-        
+                
