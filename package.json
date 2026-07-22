@@ -1,16 +1,14 @@
 {
-  "name": "public-store-bot",
+  "name": "anti-nuke-bot",
   "version": "1.0.0",
-  "description": "A professional Discord to Game Server Console Public Store Bot",
+  "description": "Standalone Anti-Nuke Discord Bot for Server Security",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
+    "discord.js": "^14.14.0",
     "dotenv": "^16.4.5",
-    "mongoose": "^8.2.1"
-  },
-  "author": "",
-  "license": "ISC"
+    "mongoose": "^8.2.0"
+  }
 }
