@@ -31,7 +31,7 @@ async function takeRollingBackup(guild) {
 
         const channels = guild.channels.cache.map(c => ({
             name: c.name,
-            type: c.type, // 4 = Category, 0 = Text, 2 = Voice
+            type: c.type,
             parentId: c.parent ? c.parent.name : null,
             position: c.position
         }));
@@ -42,12 +42,11 @@ async function takeRollingBackup(guild) {
         let config = await AntiNukeConfig.findOne({ guildId: guild.id });
         if (!config) config = new AntiNukeConfig({ guildId: guild.id });
 
-        // Keep rolling snapshots (max 3 safe backups at a time to prevent DB overload)
         if (!config.backups) config.backups = [];
         config.backups.push({ backupId, timestamp: new Date(), data: backupData });
 
         if (config.backups.length > 3) {
-            config.backups.shift(); // Purana wala uda do, naya rakh lo (Rolling Buffer)
+            config.backups.shift();
         }
 
         await config.save();
@@ -56,7 +55,6 @@ async function takeRollingBackup(guild) {
     }
 }
 
-// Run rolling backup every 30 seconds (Safe for DB, keeps recent clean state)
 setInterval(() => {
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 }, 30 * 1000);
@@ -85,7 +83,6 @@ client.on('channelDelete', async (channel) => {
         validDeletions.push(now);
         instantDeleteTracker.set(key, validDeletions);
 
-        // 1st / 2nd Action pe turant action lo!
         if (validDeletions.length >= 2) {
             instantDeleteTracker.delete(key);
             
@@ -95,14 +92,13 @@ client.on('channelDelete', async (channel) => {
                 await member.ban({ reason: `🚨 Anti-Nuke: Mass Channel Deletion Speed Trigger` }).catch(() => null);
             }
 
-            // Get the latest rolling backup taken just seconds before the nuke!
             const latestBackup = config.backups && config.backups.length > 0 ? config.backups[config.backups.length - 1] : null;
             const emergencyId = latestBackup ? latestBackup.backupId : 'No_Backup';
 
-            // Logs & Owner Alerts with Inline Code Format [isme]
+            // Clean syntax without conflicting backticks inside template literal
             const embed = new EmbedBuilder()
                 .setTitle('🚨 LIGHTNING FAST ANTI-NUKE TRIGGERED!')
-                .setDescription(`\`\`\`text\nNuker   : ${entry.executor.tag}\nAction  : Mass Channel Deletion\nStatus  : Banned & Neutralized\n\`\`\`\n**👇 Copy & Paste this restore command:**\n`/restore id:${emergencyId}`\n\n*(Ye code copy karne ke liye neeche diya hai)*\n\`/restore id:${emergencyId}\``)
+                .setDescription('```text\nNuker   : ' + entry.executor.tag + '\nAction  : Mass Channel Deletion\nStatus  : Banned & Neutralized\n```\n**👇 Copy & Paste this restore command:**\n`/restore id:' + emergencyId + '`')
                 .setColor('#FF0000')
                 .setTimestamp();
 
@@ -169,7 +165,6 @@ client.on('interactionCreate', async (interaction) => {
         const categoryMap = new Map();
         const channelData = targetBackup.data.channels;
 
-        // 1. Categories pehle banao
         const categories = channelData.filter(c => c.type === 4);
         const otherChannels = channelData.filter(c => c.type !== 4);
 
@@ -183,7 +178,6 @@ client.on('interactionCreate', async (interaction) => {
             if (createdCat) categoryMap.set(cat.name, createdCat.id);
         }
 
-        // 2. Phir channels ko unki categories mein bind karo
         for (const chan of otherChannels) {
             let parentId = null;
             if (chan.parentId && categoryMap.has(chan.parentId)) {
@@ -203,4 +197,3 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-                
