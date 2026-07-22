@@ -16,7 +16,7 @@ const client = new Client({
 const instantDeleteTracker = new Map();
 const roleDeleteTracker = new Map();
 
-// ================= ROLLING BACKUP ENGINE (Time-Machine State) =================
+// ================= ROLLING BACKUP ENGINE =================
 async function takeRollingBackup(guild) {
     try {
         const roles = guild.roles.cache
@@ -55,6 +55,7 @@ async function takeRollingBackup(guild) {
     }
 }
 
+// Every 30 seconds rolling backup
 setInterval(() => {
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 }, 30 * 1000);
@@ -92,10 +93,16 @@ client.on('channelDelete', async (channel) => {
                 await member.ban({ reason: `🚨 Anti-Nuke: Mass Channel Deletion Speed Trigger` }).catch(() => null);
             }
 
-            const latestBackup = config.backups && config.backups.length > 0 ? config.backups[config.backups.length - 1] : null;
-            const emergencyId = latestBackup ? latestBackup.backupId : 'No_Backup';
+            // Agar rolling backup nahi mila, toh turant ek emergency snapshot le lo taaki 'No_Backup' kabhi na aaye!
+            let latestBackup = config.backups && config.backups.length > 0 ? config.backups[config.backups.length - 1] : null;
+            if (!latestBackup) {
+                await takeRollingBackup(channel.guild);
+                const updatedConfig = await AntiNukeConfig.findOne({ guildId: guildId });
+                latestBackup = updatedConfig?.backups?.pop();
+            }
+            const emergencyId = latestBackup ? latestBackup.backupId : 'roll_' + Date.now();
 
-            // Clean syntax without conflicting backticks inside template literal
+            // Strict Inline Code Format as requested: `/restore id:...`
             const embed = new EmbedBuilder()
                 .setTitle('🚨 LIGHTNING FAST ANTI-NUKE TRIGGERED!')
                 .setDescription('```text\nNuker   : ' + entry.executor.tag + '\nAction  : Mass Channel Deletion\nStatus  : Banned & Neutralized\n```\n**👇 Copy & Paste this restore command:**\n`/restore id:' + emergencyId + '`')
@@ -122,6 +129,9 @@ client.on('channelDelete', async (channel) => {
 client.once('ready', async () => {
     console.log(`🛡️ Rolling-Buffer Anti-Nuke Bot Active as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
+
+    // Bot start hote hi sabhi guilds ka turant ek backup le lo taaki zero delay ho
+    client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 
     const commands = [
         new SlashCommandBuilder().setName('antinuke').setDescription('Setup Anti-Nuke config')
@@ -197,3 +207,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+                                                            
