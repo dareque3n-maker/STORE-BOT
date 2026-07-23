@@ -1,13 +1,14 @@
 {
   "name": "discord-anti-nuke-bot",
   "version": "1.0.0",
-  "description": "Powerful Anti Nuke Bot with Backups and Logging",
+  "description": "Commercial Anti-Nuke Bot with Backups and Whitelisting",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.14.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "mongoose": "^8.3.1"
   }
 }
