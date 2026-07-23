@@ -1,25 +1,25 @@
 const { EmbedBuilder } = require('discord.js');
+const AntiNukeConfig = require('../models/AntiNukeConfig');
 
-module.exports = async (client, title, description, color = '#FF0000') => {
+module.exports = async (client, guild, title, description, color = '#FF0000') => {
     try {
         const embed = new EmbedBuilder()
-            .setTitle(`🚨 Anti-Nuke Alert: ${title}`)
+            .setTitle(`🚨 Anti-Nuke Security Alert: ${title}`)
             .setDescription(description)
             .setColor(color)
             .setTimestamp();
 
-        // 1. Send to Log Channel in Server
-        const logChannelId = process.env.LOG_CHANNEL_ID;
-        if (logChannelId) {
-            const channel = await client.channels.fetch(logChannelId).catch(() => null);
-            if (channel) channel.send({ embeds: [embed] });
+        // 1. Send to Server Log Channel
+        const config = await AntiNukeConfig.findOne({ guildId: guild.id });
+        if (config && config.logChannelId) {
+            const logChannel = await guild.channels.fetch(config.logChannelId).catch(() => null);
+            if (logChannel) logChannel.send({ embeds: [embed] });
         }
 
         // 2. Send to Server Owner DM
-        const ownerId = process.env.OWNER_ID;
-        if (ownerId) {
-            const owner = await client.users.fetch(ownerId).catch(() => null);
-            if (owner) owner.send({ embeds: [embed] }).catch(() => {});
+        const owner = await guild.fetchOwner().catch(() => null);
+        if (owner) {
+            owner.send({ embeds: [embed] }).catch(() => {});
         }
     } catch (error) {
         console.error("Error in logger:", error);
