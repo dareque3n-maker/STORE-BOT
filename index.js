@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const mongoose = require('mongoose');
 const GuildConfig = require('./models/GuildConfig');
 
@@ -9,14 +9,14 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
+        GatewayIntentBits.MessageContent
     ]
 });
 
 const spamTracker = new Map();
 
-async function sendLiveLogs(guild, title, description, color = '#FF0000') {
+// Helper: Dispatch live detailed logs to Server Log Channel + Server Owner's DM simultaneously
+async function sendDualLogs(guild, title, description, color = '#FF0000') {
     try {
         const config = await GuildConfig.findOne({ guildId: guild.id });
         const embed = new EmbedBuilder()
@@ -25,17 +25,19 @@ async function sendLiveLogs(guild, title, description, color = '#FF0000') {
             .setColor(color)
             .setTimestamp();
 
+        // 1. Send to Server Log Channel
         if (config && config.logChannelId) {
             const logChan = guild.channels.cache.get(config.logChannelId);
             if (logChan) await logChan.send({ embeds: [embed] }).catch(() => null);
         }
 
+        // 2. Send to Server Owner DM
         const owner = await guild.fetchOwner().catch(() => null);
         if (owner) {
             await owner.send({ embeds: [embed] }).catch(() => null);
         }
     } catch (e) {
-        console.error('Logging Error:', e);
+        console.error('Dual Logging Error:', e);
     }
 }
 
@@ -46,20 +48,36 @@ async function isWhitelisted(guildId, userId, ownerId) {
 }
 
 
-client.once('ready', async () => {
+// ================= REGISTER / CLEAN SLASH COMMANDS ON READY =================
+client.once('clientReady', async () => {
     console.log(`🛡️ Sentinel Security Bot Online as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
 
-    // 🧹 WIPE OUT ALL OLD CACHED SLASH COMMANDS FROM DISCORD
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('antinuke')
+            .setDescription('Sentinel Security Management (Owner Only)')
+            .addSubcommand(sub =>
+                sub.setName('setup')
+                    .setDescription('Configure log channel and default safe role')
+                    .addChannelOption(opt => opt.setName('channel').setDescription('Log channel for server').setRequired(true))
+                    .addRoleOption(opt => opt.setName('saferole').setDescription('Default safe role when unauthorized bot is added').setRequired(true))
+            )
+            .addSubcommand(sub =>
+                sub.setName('whitelist')
+                    .setDescription('Manage strict whitelist')
+                    .addStringOption(opt => opt.setName('action').setDescription('Add or Remove').setRequired(true)
+                        .addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }))
+                    .addUserOption(opt => opt.setName('target').setDescription('User or Bot to whitelist').setRequired(true))
+            )
+    ].map(c => c.toJSON());
+
     try {
-        const guildIds = client.guilds.cache.map(g => g.id);
-        for (const guildId of guildIds) {
-            await client.application.commands.set([], guildId);
-        }
-        await client.application.commands.set([]);
-        console.log('✨ All old cached slash commands wiped successfully!');
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('✅ Slash commands registered successfully!');
     } catch (e) {
-        console.error('Command wipe error:', e);
+        console.error('Command registration error:', e);
     }
 });
 
@@ -77,8 +95,10 @@ client.on('guildMemberAdd', async (member) => {
         const allowed = await isWhitelisted(member.guild.id, executorId, member.guild.ownerId);
 
         if (!allowed) {
+            // Kick unauthorized bot
             await member.kick('Sentinel: Unauthorized Bot Addition').catch(() => null);
 
+            // Strip roles from the player who added it, keep only default safe role
             const adder = await member.guild.members.fetch(executorId).catch(() => null);
             if (adder) {
                 const config = await GuildConfig.findOne({ guildId: member.guild.id });
@@ -87,10 +107,10 @@ client.on('guildMemberAdd', async (member) => {
                 await adder.roles.set(newRoles, 'Sentinel: Added unauthorized bot').catch(() => null);
             }
 
-            await sendLiveLogs(
+            await sendDualLogs(
                 member.guild,
                 '🚨 UNAUTHORIZED BOT BLOCKED & ADDER PUNISHED',
-                `\`\`\`text\nBot Added : ${member.user.tag}\nAdded By  : ${entry.executor.tag}\nAction    : Bot Kicked, Adder Roles Stripped\n\`\`\``
+                `\`\`\`text\nBot Added : ${member.user.tag}\nAdded By  : ${entry.executor.tag}\nAction    : Bot Kicked, Adder Roles Stripped to Safe Role\n\`\`\``
             );
         }
     } catch (e) {
@@ -101,15 +121,15 @@ client.on('guildMemberAdd', async (member) => {
 
 // ================= 2. ADMIN & PLAYER PROTECTION GUARD =================
 client.on('channelDelete', async (channel) => {
-    handleUnauthorizedAction(channel.guild, channel.name, 'Channel Delete', AuditLogEvent.ChannelDelete);
+    await handleUnauthorizedAction(channel.guild, channel.name, 'Channel Delete', AuditLogEvent.ChannelDelete);
 });
 
 client.on('channelCreate', async (channel) => {
-    handleUnauthorizedAction(channel.guild, channel.name, 'Channel Create', AuditLogEvent.ChannelCreate, true);
+    await handleUnauthorizedAction(channel.guild, channel.name, 'Channel Create', AuditLogEvent.ChannelCreate, true);
 });
 
 client.on('roleDelete', async (role) => {
-    handleUnauthorizedAction(role.guild, role.name, 'Role Delete', AuditLogEvent.RoleDelete);
+    await handleUnauthorizedAction(role.guild, role.name, 'Role Delete', AuditLogEvent.RoleDelete);
 });
 
 async function handleUnauthorizedAction(guild, targetName, actionType, auditEventType, isCreation = false) {
@@ -127,6 +147,7 @@ async function handleUnauthorizedAction(guild, targetName, actionType, auditEven
                 if (member.user.bot) {
                     if (member.bannable) await member.ban({ reason: `Sentinel: Unauthorized ${actionType}` }).catch(() => null);
                 } else {
+                    // Strip all roles from human admin/player immediately
                     await member.roles.set([], `Sentinel: Unauthorized ${actionType}`).catch(() => null);
                 }
             }
@@ -136,13 +157,13 @@ async function handleUnauthorizedAction(guild, targetName, actionType, auditEven
                 if (chan) await chan.delete('Sentinel: Unauthorized Creation').catch(() => null);
             }
 
-            await sendLiveLogs(
+            await sendDualLogs(
                 guild,
                 `🛡️ UNAUTHORIZED ${actionType.toUpperCase()} BLOCKED`,
-                `\`\`\`text\nTarget    : ${targetName}\nAction By : ${entry.executor.tag}\nResponse  : Offender Neutralized / Roles Stripped\n\`\`\``
+                `\`\`\`text\nTarget    : ${targetName}\nAction By : ${entry.executor.tag}\nResponse  : Offender Neutralized / All Roles Stripped\n\`\`\``
             );
         } else {
-            await sendLiveLogs(
+            await sendDualLogs(
                 guild,
                 `📝 Action Log: ${actionType}`,
                 `\`\`\`text\nTarget    : ${targetName}\nExecuted By: ${entry.executor.tag}\n\`\`\``,
@@ -152,7 +173,7 @@ async function handleUnauthorizedAction(guild, targetName, actionType, auditEven
     } catch (e) {
         console.error('Action Guard Error:', e);
     }
-});
+}
 
 
 // ================= 3. ANTI-SPAM & MASS PING =================
@@ -178,95 +199,92 @@ client.on('messageCreate', async (message) => {
 
         if (userSpam.count === 1) {
             await message.reply({ content: `⚠️ **Warning:** Please do not spam or mass mention!` }).catch(() => null);
-            await sendLiveLogs(message.guild, '⚠️ Anti-Spam Warning', `\`\`\`text\nUser : ${message.author.tag}\nOffense: 1st Warning\n\`\`\``, '#FFA500');
+            await sendDualLogs(message.guild, '⚠️ Anti-Spam Warning', `\`\`\`text\nUser : ${message.author.tag}\nOffense: 1st Warning (Spam)\n\`\`\``, '#FFA500');
         } 
         else if (userSpam.count === 2) {
             await message.delete().catch(() => null);
             await member.timeout(15 * 1000, 'Sentinel Anti-Spam: 2nd Offense').catch(() => null);
-            await sendLiveLogs(message.guild, '🔇 Anti-Spam Timeout (15s)', `\`\`\`text\nUser : ${message.author.tag}\nPenalty: Message Deleted + 15s Timeout\n\`\`\``);
+            await sendDualLogs(message.guild, '🔇 Anti-Spam Timeout (15s)', `\`\`\`text\nUser : ${message.author.tag}\nPenalty: Message Deleted + 15s Timeout\n\`\`\``);
         } 
         else if (userSpam.count >= 3) {
             await message.delete().catch(() => null);
             await member.timeout(60 * 1000, 'Sentinel Anti-Spam: 3rd Offense').catch(() => null);
             userSpam.count = 0;
-            await sendLiveLogs(message.guild, '🔇 Anti-Spam Timeout (1m)', `\`\`\`text\nUser : ${message.author.tag}\nPenalty: Message Deleted + 1m Timeout\n\`\`\``);
+            await sendDualLogs(message.guild, '🔇 Anti-Spam Timeout (1m)', `\`\`\`text\nUser : ${message.author.tag}\nPenalty: Message Deleted + 1 Minute Timeout\n\`\`\``);
         }
     }
 });
 
 
-// ================= 4. EXCLUSIVE OWNER DM CONTROL SYSTEM =================
-client.on('messageCreate', async (message) => {
-    if (message.guild) return; // Only process in DMs
-    if (message.author.bot) return;
+// ================= 4. EXCLUSIVE SERVER OWNER SLASH COMMAND HANDLER =================
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
 
-    const ownerId = message.author.id;
-    const managedGuilds = client.guilds.cache.filter(g => g.ownerId === ownerId);
-
-    if (managedGuilds.size === 0) {
-        return message.reply('❌ You are not the **Server Owner** of any server managed by this bot.');
+    // Strict Ownership restriction: Only server owner can run bot commands
+    if (interaction.user.id !== interaction.guild.ownerId) {
+        return await interaction.reply({ content: '❌ Only the **Server Owner** can manage Sentinel Security settings!', ephemeral: true });
     }
 
-    const args = message.content.trim().split(/ +/);
-    const cmd = args.shift().toLowerCase();
+    if (interaction.commandName === 'antinuke') {
+        const sub = interaction.options.getSubcommand();
+        let config = await GuildConfig.findOne({ guildId: interaction.guild.id });
+        if (!config) config = new GuildConfig({ guildId: interaction.guild.id });
 
-    if (cmd === '!setup') {
-        // Usage in DM: !setup <guild_id> <log_channel_id> <safe_role_id>
-        const guildId = args[0];
-        const logChanId = args[1];
-        const safeRoleId = args[2];
+        if (sub === 'setup') {
+            const chan = interaction.options.getChannel('channel');
+            const safeRole = interaction.options.getRole('saferole');
 
-        if (!guildId) return message.reply('❌ Usage: `!setup <guild_id> <log_channel_id> <safe_role_id>`');
-
-        const targetGuild = client.guilds.cache.get(guildId);
-        if (!targetGuild || targetGuild.ownerId !== ownerId) {
-            return message.reply('❌ Invalid Guild ID or you are not the owner of that server.');
-        }
-
-        let config = await GuildConfig.findOne({ guildId });
-        if (!config) config = new GuildConfig({ guildId });
-
-        if (logChanId) config.logChannelId = logChanId;
-        if (safeRoleId) config.defaultSafeRoleId = safeRoleId;
-        await config.save();
-
-        return message.reply(`✅ Successfully updated settings for **${targetGuild.name}**!\nLog Channel ID: \`${logChanId}\`\nSafe Role ID: \`${safeRoleId}\``);
-    }
-
-    if (cmd === '!whitelist') {
-        // Usage in DM: !whitelist <guild_id> add/remove <user_id>
-        const guildId = args[0];
-        const action = args[1];
-        const targetId = args[2];
-
-        if (!guildId || !action || !targetId) {
-            return message.reply('❌ Usage: `!whitelist <guild_id> add/remove <user_id>`');
-        }
-
-        const targetGuild = client.guilds.cache.get(guildId);
-        if (!targetGuild || targetGuild.ownerId !== ownerId) {
-            return message.reply('❌ Invalid Guild ID.');
-        }
-
-        let config = await GuildConfig.findOne({ guildId });
-        if (!config) config = new GuildConfig({ guildId });
-        if (!config.whitelistedUsers) config.whitelistedUsers = [];
-
-        if (action === 'add') {
-            if (!config.whitelistedUsers.includes(targetId)) {
-                config.whitelistedUsers.push(targetId);
-                await config.save();
-                return message.reply(`✅ Added user ID \`${targetId}\` to whitelist for **${targetGuild.name}**.`);
-            } else {
-                return message.reply(`⚠️ User is already whitelisted.`);
-            }
-        } else if (action === 'remove') {
-            config.whitelistedUsers = config.whitelistedUsers.filter(id => id !== targetId);
+            config.logChannelId = chan.id;
+            config.defaultSafeRoleId = safeRole.id;
             await config.save();
-            return message.reply(`✅ Removed user ID \`${targetId}\` from whitelist for **${targetGuild.name}**.`);
+
+            await sendDualLogs(
+                interaction.guild,
+                '⚙️ Sentinel Settings Updated',
+                `\`\`\`text\nUpdated By  : ${interaction.user.tag}\nLog Channel : #${chan.name}\nSafe Role   : @${safeRole.name}\n\`\`\``,
+                '#0099FF'
+            );
+
+            return await interaction.reply({ content: `✅ Successfully updated security settings! Logs will be sent to ${chan} and your DM.`, ephemeral: true });
+        }
+
+        if (sub === 'whitelist') {
+            const action = interaction.options.getString('action');
+            const target = interaction.options.getUser('target');
+
+            if (!config.whitelistedUsers) config.whitelistedUsers = [];
+
+            if (action === 'add') {
+                if (config.whitelistedUsers.includes(target.id)) {
+                    return await interaction.reply({ content: `⚠️ ${target.tag} is already whitelisted.`, ephemeral: true });
+                }
+                config.whitelistedUsers.push(target.id);
+                await config.save();
+
+                await sendDualLogs(
+                    interaction.guild,
+                    '🟢 Whitelist Added',
+                    `\`\`\`text\nAdmin       : ${interaction.user.tag}\nAdded User  : ${target.tag} (${target.id})\n\`\`\``,
+                    '#00FF00'
+                );
+
+                return await interaction.reply({ content: `✅ Successfully added **${target.tag}** to the strict whitelist.`, ephemeral: true });
+            } else if (action === 'remove') {
+                config.whitelistedUsers = config.whitelistedUsers.filter(id => id !== target.id);
+                await config.save();
+
+                await sendDualLogs(
+                    interaction.guild,
+                    '🔴 Whitelist Removed',
+                    `\`\`\`text\nAdmin       : ${interaction.user.tag}\nRemoved User: ${target.tag} (${target.id})\n\`\`\``,
+                    '#FF0000'
+                );
+
+                return await interaction.reply({ content: `✅ Successfully removed **${target.tag}** from the whitelist.`, ephemeral: true });
+            }
         }
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-    
+                                                                    
