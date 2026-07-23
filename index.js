@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require('discord.js');
 const mongoose = require('mongoose');
 const AntiNukeConfig = require('./models/AntiNukeConfig');
 
@@ -13,11 +13,10 @@ const client = new Client({
     ]
 });
 
-// Helper: Send detailed A-to-Z logs to Log Channel + Owner DM
+// Helper: Send logs to channel and owner DM
 async function sendOlympusLog(guild, title, description, color = '#FF0000') {
     try {
         const config = await AntiNukeConfig.findOne({ guildId: guild.id });
-        
         const embed = new EmbedBuilder()
             .setTitle(title)
             .setDescription(description)
@@ -44,8 +43,49 @@ async function isWhitelisted(guildId, userId, ownerId) {
     return config && config.whitelistedUsers && config.whitelistedUsers.includes(userId);
 }
 
+// ================= HARDCORE OLYMPUS LOCKDOWN ENGINE =================
+// Ye function unwhitelisted roles/bots ki aisi taisi kar dega aur unse dangerous permissions chheen lega
+async function enforceSecurityLockdown(guild) {
+    try {
+        const ownerId = guild.ownerId;
+        const config = await AntiNukeConfig.findOne({ guildId: guild.id });
+        const whitelisted = config ? config.whitelistedUsers : [];
 
-// ================= OLYMPUS STRICT SECURITY ENGINE =================
+        guild.roles.cache.forEach(async (role) => {
+            // Owner ya bot ke apne roles ko chhod kar baaki sabhi roles se dangerous permissions strip kar do
+            if (role.managed || role.id === guild.id) return;
+            
+            // Agar role kisi whitelisted member ka nahi hai ya general admin role hai
+            if (role.permissions.has(PermissionFlagsBits.Administrator) || 
+                role.permissions.has(PermissionFlagsBits.ManageChannels) || 
+                role.permissions.has(PermissionFlagsBits.ManageRoles)) {
+                
+                // Check if any member with this role is whitelisted. If not, lock down permissions!
+                const hasWhitelistedMember = role.members.some(m => m.id === ownerId || whitelisted.includes(m.id));
+                
+                if (!hasWhitelistedMember) {
+                    await role.setPermissions(role.permissions.remove([
+                        PermissionFlagsBits.Administrator,
+                        PermissionFlagsBits.ManageChannels,
+                        PermissionFlagsBits.ManageRoles,
+                        PermissionFlagsBits.BanMembers,
+                        PermissionFlagsBits.KickMembers
+                    ])).catch(() => null);
+                }
+            }
+        });
+    } catch (e) {
+        console.error('Lockdown error:', e);
+    }
+}
+
+// Run lockdown check periodically and on guild events
+setInterval(() => {
+    client.guilds.cache.forEach(guild => enforceSecurityLockdown(guild));
+}, 10 * 1000);
+
+
+// ================= EVENT GUARDS =================
 
 client.on('guildMemberAdd', async (member) => {
     try {
@@ -111,79 +151,13 @@ client.on('channelDelete', async (channel) => {
     }
 });
 
-client.on('channelCreate', async (channel) => {
-    try {
-        const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelCreate }).catch(() => null);
-        const entry = audit?.entries.first();
-        if (!entry || !entry.executor) return;
-
-        const executorId = entry.executor.id;
-        const allowed = await isWhitelisted(channel.guild.id, executorId, channel.guild.ownerId);
-
-        if (!allowed && entry.executor.id !== client.user.id) {
-            const member = await channel.guild.members.fetch(executorId).catch(() => null);
-            if (member) {
-                if (member.user.bot) {
-                    await member.ban({ reason: `🚨 Olympus Guard: Unauthorized Channel Creation` }).catch(() => null);
-                } else {
-                    await member.roles.set([]).catch(() => null);
-                }
-            }
-            await channel.delete('Olympus Guard: Unauthorized Creation').catch(() => null);
-
-            await sendOlympusLog(
-                channel.guild,
-                '🛡️ UNAUTHORIZED CHANNEL CREATION BLOCKED',
-                `\`\`\`text\nChannel   : #${channel.name}\nCreated By: ${entry.executor.tag}\nResponse  : Deleted & Offender Neutralized\n\`\`\``
-            );
-        } else {
-            await sendOlympusLog(
-                channel.guild,
-                '📝 Channel Created',
-                `\`\`\`text\nChannel   : #${channel.name}\nCreated By: ${entry.executor.tag}\n\`\`\``,
-                '#00FF00'
-            );
-        }
-    } catch (e) {
-        console.error('Channel Create Error:', e);
-    }
-});
-
-client.on('roleDelete', async (role) => {
-    try {
-        const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
-        const entry = audit?.entries.first();
-        if (!entry || !entry.executor) return;
-
-        const executorId = entry.executor.id;
-        const allowed = await isWhitelisted(role.guild.id, executorId, role.guild.ownerId);
-
-        if (!allowed) {
-            const member = await role.guild.members.fetch(executorId).catch(() => null);
-            if (member) {
-                if (member.user.bot) {
-                    await member.ban({ reason: `🚨 Olympus Guard: Unauthorized Role Deletion` }).catch(() => null);
-                } else {
-                    await member.roles.set([]).catch(() => null);
-                }
-            }
-
-            await sendOlympusLog(
-                role.guild,
-                '🛡️ UNAUTHORIZED ROLE DELETION BLOCKED',
-                `\`\`\`text\nRole      : @${role.name}\nDeleted By: ${entry.executor.tag}\nResponse  : Offender Neutralized\n\`\`\``
-            );
-        }
-    } catch (e) {
-        console.error('Role Delete Error:', e);
-    }
-});
-
 
 // ================= SLASH COMMANDS =================
 client.once('clientReady', async () => {
-    console.log(`🛡️ Olympus-Style Security Bot Active as ${client.user.tag}`);
+    console.log(`🛡️ Olympus Hardcore Security Bot Active as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
+
+    client.guilds.cache.forEach(guild => enforceSecurityLockdown(guild));
 
     const commands = [
         new SlashCommandBuilder()
@@ -192,7 +166,7 @@ client.once('clientReady', async () => {
             .addSubcommand(subcommand =>
                 subcommand
                     .setName('setup')
-                    .setDescription('Set log channel')
+                    .setDescription('Set log channel & enforce hard lockdown')
                     .addChannelOption(option =>
                         option.setName('channel').setDescription('Log channel').setRequired(true)
                     )
@@ -227,13 +201,17 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.commandName === 'antinuke') {
         const sub = interaction.options.getSubcommand();
         let config = await AntiNukeConfig.findOne({ guildId: interaction.guild.id });
-        if (!config) config = new AntiNukeConfig({ guildId: interaction.guild.id });
+        if (!config) config = new AntiNicoConfig({ guildId: interaction.guild.id });
 
         if (sub === 'setup') {
             const chan = interaction.options.getChannel('channel');
             config.logChannelId = chan.id;
             await config.save();
-            return await interaction.reply({ content: `✅ Olympus security logs & owner DMs will now be sent to ${chan}`, ephemeral: true });
+            
+            // Enforce immediate lockdown on setup
+            await enforceSecurityLockdown(interaction.guild);
+
+            return await interaction.reply({ content: `✅ Olympus security logs set to ${chan} & **Hardcore Permission Lockdown** enforced across all roles!`, ephemeral: true });
         }
 
         if (sub === 'whitelist') {
@@ -252,11 +230,15 @@ client.on('interactionCreate', async (interaction) => {
             } else if (action === 'remove') {
                 config.whitelistedUsers = config.whitelistedUsers.filter(id => id !== target.id);
                 await config.save();
-                return await interaction.reply({ content: `✅ Successfully removed **${target.tag}** from the whitelist.`, ephemeral: true });
+                
+                // Re-enforce lockdown after removing someone from whitelist
+                await enforceSecurityLockdown(interaction.guild);
+
+                return await interaction.reply({ content: `✅ Successfully removed **${target.tag}** from the whitelist and updated security lockdown.`, ephemeral: true });
             }
         }
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-                                              
+            
