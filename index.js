@@ -42,7 +42,6 @@ async function takeRollingBackup(guild) {
         if (!config.backups) config.backups = [];
         config.backups.push({ backupId, timestamp: new Date(), data: backupData });
 
-        // Keep last 10 snapshots safe, older ones auto-prune
         if (config.backups.length > 10) {
             config.backups.shift();
         }
@@ -55,12 +54,10 @@ async function takeRollingBackup(guild) {
     }
 }
 
-// Periodic background rolling state (every 30 secs)
 setInterval(() => {
     client.guilds.cache.forEach(guild => takeRollingBackup(guild));
 }, 30 * 1000);
 
-// Helper function to dispatch logs to Log Channel + Owner DM with exact format
 async function sendAlertLogs(guild, config, title, description, emergencyId = null) {
     let desc = description;
     if (emergencyId) {
@@ -73,13 +70,11 @@ async function sendAlertLogs(guild, config, title, description, emergencyId = nu
         .setColor('#FF0000')
         .setTimestamp();
 
-    // 1. Send to Log Channel
     if (config && config.logChannelId) {
         const logChan = guild.channels.cache.get(config.logChannelId);
         if (logChan) await logChan.send({ embeds: [embed] }).catch(() => null);
     }
 
-    // 2. Send to Owner DM
     const owner = await guild.fetchOwner().catch(() => null);
     if (owner) {
         await owner.send({ embeds: [embed] }).catch(() => null);
@@ -89,7 +84,6 @@ async function sendAlertLogs(guild, config, title, description, emergencyId = nu
 
 // ================= STRICT WHITELIST & ANTI-NUKE DEFENSE =================
 
-// Bot Add Protection (Unauthorized Bot Add Guard)
 client.on('guildMemberAdd', async (member) => {
     try {
         if (!member.user.bot) return;
@@ -104,7 +98,6 @@ client.on('guildMemberAdd', async (member) => {
         const config = await AntiNukeConfig.findOne({ guildId: member.guild.id });
         if (config && config.whitelistedUsers && config.whitelistedUsers.includes(executorId)) return;
 
-        // UNAUTHORIZED BOT ADD DETECTED!
         await member.kick('Unauthorized Bot Addition').catch(() => null);
         
         const banner = await member.guild.members.fetch(executorId).catch(() => null);
@@ -126,7 +119,6 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// Channel Deletion Protection
 client.on('channelDelete', async (channel) => {
     try {
         const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
@@ -160,7 +152,7 @@ client.on('channelDelete', async (channel) => {
 
 
 // ================= SLASH COMMANDS REGISTRATION =================
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     console.log(`🛡️ Enterprise Anti-Nuke Bot Active as ${client.user.tag}`);
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
 
@@ -168,10 +160,11 @@ client.once('ready', async () => {
 
     const commands = [
         new SlashCommandBuilder().setName('antinuke').setDescription('Anti-Nuke Management (Owner Only)')
-            .addSubcommand(s => s.setName('setup').setDescription('Set log channel').addChannelOption(c => c.setName('channel').setDescription('Log channel').setRequired(true)))
+            .addSubcommand(s => s.setName('setup').setDescription('Set log channel')
+                .addChannelOption(c => c.setName('channel').setDescription('Log channel').setRequired(true)))
             .addSubcommand(s => s.setName('whitelist').setDescription('Whitelist a user/bot')
                 .addStringOption(o => o.setName('action').setDescription('Add or Remove').setRequired(true).addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }))
-                .setUserOption(u => u.setName('target').setDescription('User or Bot to whitelist').setRequired(true))),
+                .addUserOption(u => u.setName('target').setDescription('User or Bot to whitelist').setRequired(true))),
         
         new SlashCommandBuilder().setName('restore').setDescription('Restore server from emergency backup (Owner Only)')
             .addStringOption(o => o.setName('id').setDescription('Backup ID').setRequired(true))
@@ -182,11 +175,10 @@ client.once('ready', async () => {
 });
 
 
-// ================= COMMAND HANDLING (OWNER ONLY RESTRICTION) =================
+// ================= COMMAND HANDLING =================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // Strict Ownership restriction for all security configurations
     if (interaction.user.id !== interaction.guild.ownerId) {
         return await interaction.reply({ content: '❌ Only the **Server Owner** can manage Anti-Nuke settings!', ephemeral: true });
     }
@@ -271,4 +263,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-                
+                                                    
