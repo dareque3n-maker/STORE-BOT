@@ -5,7 +5,6 @@ require('dotenv').config();
 const AntiNukeConfig = require('./models/AntiNukeConfig');
 const BackupSnapshot = require('./models/BackupSnapshot');
 
-// Using direct numeric intents to completely bypass any undefined bitfield issues
 const client = new Client({
     intents: [
         1,      // Guilds
@@ -13,12 +12,11 @@ const client = new Client({
         1 << 7, // GuildBans
         1 << 3, // GuildEmojisAndStickers
         1 << 5, // GuildWebhooks
-        1 << 0  // GuildAuditLogs (approx or combined flags)
+        1 << 0  // GuildAuditLogs
     ],
     partials: [Partials.GuildMember, Partials.User, Partials.Message]
 });
 
-// Fallback to TOKEN if MONGO_URI is not provided in railway variables
 const dbUri = process.env.MONGO_URI || process.env.TOKEN;
 mongoose.connect(dbUri).then(() => {
     console.log("[DATABASE] Connected successfully.");
@@ -49,35 +47,10 @@ client.once('ready', async () => {
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-
-client.once('ready', async () => {
-    console.log(`[READY] Anti-Nuke Bot online as ${client.user.tag}`);
-
-    const commands = [
-        new SlashCommandBuilder()
-            .setName('security')
-            .setDescription('Setup anti-nuke log channel')
-            .addSubcommand(sub =>
-                sub.setName('setup')
-                    .setDescription('Set log channel for security alerts')
-                    .addChannelOption(option => option.setName('channel').setDescription('Log channel').setRequired(true))
-            ),
-        new SlashCommandBuilder()
-            .setName('whitelist')
-            .setDescription('Whitelist a bot or user (Owner only)')
-            .addUserOption(option => option.setName('target').setDescription('Bot or User to whitelist').setRequired(true)),
-        new SlashCommandBuilder()
-            .setName('restore')
-            .setDescription('Restore server channels and categories using backup ID')
-            .addStringOption(option => option.setName('id').setDescription('Restore ID (e.g. RESTORE-12345)').setRequired(true))
-    ];
-
     try {
-        // 1. Register Globally (Public bot ke liye main method)
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
         console.log('[COMMANDS] Registered globally for all public servers.');
 
-        // 2. Instantly register for all current servers where the bot is already added
         const guilds = client.guilds.cache.map(g => g.id);
         for (const guildId of guilds) {
             await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: commands });
@@ -87,7 +60,6 @@ client.once('ready', async () => {
         console.error("Command registration error:", error);
     }
 });
-    
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
@@ -96,19 +68,25 @@ client.on('interactionCreate', async interaction => {
         if (interaction.user.id !== interaction.guild.ownerId) {
             return interaction.reply({ content: '❌ Only Server Owner can use this command.', ephemeral: true });
         }
+        
+        await interaction.deferReply({ ephemeral: true });
+
         const channel = interaction.options.getChannel('channel');
         await AntiNukeConfig.findOneAndUpdate(
             { guildId: interaction.guild.id },
             { logChannelId: channel.id },
             { upsert: true, new: true }
         );
-        return interaction.reply({ content: `✅ Security log channel successfully set to ${channel}`, ephemeral: true });
+        return interaction.editReply({ content: `✅ Security log channel successfully set to ${channel}` });
     }
 
     if (interaction.commandName === 'whitelist') {
         if (interaction.user.id !== interaction.guild.ownerId) {
             return interaction.reply({ content: '❌ Only Server Owner can manage whitelists.', ephemeral: true });
         }
+        
+        await interaction.deferReply({ ephemeral: true });
+
         const target = interaction.options.getUser('target');
         let config = await AntiNukeConfig.findOne({ guildId: interaction.guild.id });
         if (!config) config = await AntiNukeConfig.create({ guildId: interaction.guild.id });
@@ -119,7 +97,7 @@ client.on('interactionCreate', async interaction => {
             if (!config.whitelistedUsers.includes(target.id)) config.whitelistedUsers.push(target.id);
         }
         await config.save();
-        return interaction.reply({ content: `✅ Successfully whitelisted **${target.tag}**.`, ephemeral: true });
+        return interaction.editReply({ content: `✅ Successfully whitelisted **${target.tag}**.` });
     }
 
     if (interaction.commandName === 'restore') {
