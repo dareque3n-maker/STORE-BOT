@@ -1,7 +1,7 @@
 {
-  "name": "anti-nuke-bot",
+  "name": "sentinel-security-bot",
   "version": "1.0.0",
-  "description": "Advanced Discord Anti-Nuke Bot",
+  "description": "Advanced DM-Controlled Security & Anti-Nuke Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
