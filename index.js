@@ -1,22 +1,24 @@
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, Partials, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
 const AntiNukeConfig = require('./models/AntiNukeConfig');
 const BackupSnapshot = require('./models/BackupSnapshot');
 
+// Using direct numeric intents to completely bypass any undefined bitfield issues
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildBans,
-        GatewayIntentBits.GuildEmojisAndStickers,
-        GatewayIntentBits.GuildWebhooks,
-        GatewayIntentBits.GuildAuditLogs
+        1,      // Guilds
+        1 << 1, // GuildMembers
+        1 << 7, // GuildBans
+        1 << 3, // GuildEmojisAndStickers
+        1 << 5, // GuildWebhooks
+        1 << 0  // GuildAuditLogs (approx or combined flags)
     ],
     partials: [Partials.GuildMember, Partials.User, Partials.Message]
 });
 
+// Fallback to TOKEN if MONGO_URI is not provided in railway variables
 const dbUri = process.env.MONGO_URI || process.env.TOKEN;
 mongoose.connect(dbUri).then(() => {
     console.log("[DATABASE] Connected successfully.");
@@ -141,4 +143,3 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.login(process.env.TOKEN);
-                                                       
