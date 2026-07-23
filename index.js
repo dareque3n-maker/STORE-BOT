@@ -5,7 +5,6 @@ require('dotenv').config();
 const AntiNukeConfig = require('./models/AntiNukeConfig');
 const BackupSnapshot = require('./models/BackupSnapshot');
 
-// Safe Client Initialization with explicit intents
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -18,13 +17,11 @@ const client = new Client({
     partials: [Partials.GuildMember, Partials.User, Partials.Message]
 });
 
-// Connect MongoDB (Fallback to TOKEN if MONGO_URI is missing)
 const dbUri = process.env.MONGO_URI || process.env.TOKEN;
 mongoose.connect(dbUri).then(() => {
     console.log("[DATABASE] Connected successfully.");
 }).catch(err => console.error("[DATABASE ERROR]", err));
 
-// Load Anti-Nuke Handler
 require('./handlers/antiNuke')(client);
 
 client.once('ready', async () => {
@@ -58,7 +55,6 @@ client.once('ready', async () => {
     }
 });
 
-// Handle Slash Commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -137,11 +133,12 @@ client.on('interactionCreate', async interaction => {
             }
 
             return interaction.editReply({ content: `✅ Server structure successfully restored using snapshot ID: \`${restoreId}\`!` });
-        }CATCH (err) {
-            Console.error("Restore failed:", err);
-            Return interaction.editReply({ content: '❌ Failed to fully restore server structure. Check console permissions.' });
+        } catch (err) {
+            console.error("Restore failed:", err);
+            return interaction.editReply({ content: '❌ Failed to fully restore server structure. Check console permissions.' });
         }
     }
 });
 
-Client.login(process.env.TOKEN);
+client.login(process.env.TOKEN);
+                                                       
