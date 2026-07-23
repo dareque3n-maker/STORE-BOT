@@ -49,13 +49,45 @@ client.once('ready', async () => {
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+
+client.once('ready', async () => {
+    console.log(`[READY] Anti-Nuke Bot online as ${client.user.tag}`);
+
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('security')
+            .setDescription('Setup anti-nuke log channel')
+            .addSubcommand(sub =>
+                sub.setName('setup')
+                    .setDescription('Set log channel for security alerts')
+                    .addChannelOption(option => option.setName('channel').setDescription('Log channel').setRequired(true))
+            ),
+        new SlashCommandBuilder()
+            .setName('whitelist')
+            .setDescription('Whitelist a bot or user (Owner only)')
+            .addUserOption(option => option.setName('target').setDescription('Bot or User to whitelist').setRequired(true)),
+        new SlashCommandBuilder()
+            .setName('restore')
+            .setDescription('Restore server channels and categories using backup ID')
+            .addStringOption(option => option.setName('id').setDescription('Restore ID (e.g. RESTORE-12345)').setRequired(true))
+    ];
+
     try {
+        // 1. Register Globally (Public bot ke liye main method)
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('[COMMANDS] Slash commands registered globally.');
+        console.log('[COMMANDS] Registered globally for all public servers.');
+
+        // 2. Instantly register for all current servers where the bot is already added
+        const guilds = client.guilds.cache.map(g => g.id);
+        for (const guildId of guilds) {
+            await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: commands });
+        }
+        console.log('[COMMANDS] Instantly synced to all active servers.');
     } catch (error) {
         console.error("Command registration error:", error);
     }
 });
+    
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
