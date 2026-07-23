@@ -13,7 +13,7 @@ const client = new Client({
     ]
 });
 
-// Helper: Send detailed A-to-Z logs to Log Channel + Owner DM simultaneously
+// Helper: Send detailed A-to-Z logs to Log Channel + Owner DM
 async function sendOlympusLog(guild, title, description, color = '#FF0000') {
     try {
         const config = await AntiNukeConfig.findOne({ guildId: guild.id });
@@ -24,13 +24,11 @@ async function sendOlympusLog(guild, title, description, color = '#FF0000') {
             .setColor(color)
             .setTimestamp();
 
-        // 1. Send to Log Channel
         if (config && config.logChannelId) {
             const logChan = guild.channels.cache.get(config.logChannelId);
             if (logChan) await logChan.send({ embeds: [embed] }).catch(() => null);
         }
 
-        // 2. Send to Server Owner DM
         const owner = await guild.fetchOwner().catch(() => null);
         if (owner) {
             await owner.send({ embeds: [embed] }).catch(() => null);
@@ -40,7 +38,6 @@ async function sendOlympusLog(guild, title, description, color = '#FF0000') {
     }
 }
 
-// Check if a user/bot is whitelisted by the Owner
 async function isWhitelisted(guildId, userId, ownerId) {
     if (userId === ownerId || userId === client.user.id) return true;
     const config = await AntiNukeConfig.findOne({ guildId });
@@ -50,7 +47,6 @@ async function isWhitelisted(guildId, userId, ownerId) {
 
 // ================= OLYMPUS STRICT SECURITY ENGINE =================
 
-// 1. Bot Add Protection
 client.on('guildMemberAdd', async (member) => {
     try {
         if (!member.user.bot) return;
@@ -63,7 +59,6 @@ client.on('guildMemberAdd', async (member) => {
         const allowed = await isWhitelisted(member.guild.id, executorId, member.guild.ownerId);
 
         if (!allowed) {
-            // Unauthorized bot -> Kick bot & Ban the adder immediately
             await member.kick('Olympus Guard: Unauthorized Bot Addition').catch(() => null);
             
             const adder = await member.guild.members.fetch(executorId).catch(() => null);
@@ -83,7 +78,6 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// 2. Channel Deletion Protection
 client.on('channelDelete', async (channel) => {
     try {
         const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
@@ -97,13 +91,11 @@ client.on('channelDelete', async (channel) => {
             const member = await channel.guild.members.fetch(executorId).catch(() => null);
             if (member) {
                 if (member.user.bot) {
-                    // Bot trying to delete -> Ban
                     if (member.bannable) {
                         await member.roles.set([]).catch(() => null);
                         await member.ban({ reason: `🚨 Olympus Guard: Unauthorized Channel Deletion` }).catch(() => null);
                     }
                 } else {
-                    // Human Admin trying to mess up -> Strip all roles instantly (No kick/ban)
                     await member.roles.set([]).catch(() => null);
                 }
             }
@@ -119,7 +111,6 @@ client.on('channelDelete', async (channel) => {
     }
 });
 
-// 3. Channel Creation Logging & Guard
 client.on('channelCreate', async (channel) => {
     try {
         const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelCreate }).catch(() => null);
@@ -146,7 +137,6 @@ client.on('channelCreate', async (channel) => {
                 `\`\`\`text\nChannel   : #${channel.name}\nCreated By: ${entry.executor.tag}\nResponse  : Deleted & Offender Neutralized\n\`\`\``
             );
         } else {
-            // General Log for Safe Action
             await sendOlympusLog(
                 channel.guild,
                 '📝 Channel Created',
@@ -159,7 +149,6 @@ client.on('channelCreate', async (channel) => {
     }
 });
 
-// 4. Role Deletion / Creation / Modification Tracking & Guard
 client.on('roleDelete', async (role) => {
     try {
         const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
@@ -197,12 +186,29 @@ client.once('clientReady', async () => {
     if (process.env.MONGO_URI) await mongoose.connect(process.env.MONGO_URI);
 
     const commands = [
-        new SlashCommandBuilder().setName('antinuke').setDescription('Olympus Security Management (Owner Only)')
-            .addSubcommand(s => s.setName('setup').setDescription('Set log channel')
-                .addChannelOption(c => c.setName('channel').setDescription('Log channel').setRequired(true)))
-            .addSubcommand(s => s.setName('whitelist').setDescription('Whitelist a user/bot')
-                .addStringOption(o => o.setName('action').setDescription('Add or Remove').setRequired(true).addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }))
-                .setUserOption(u => u.setName('target').setDescription('User or Bot to whitelist').setRequired(true)))
+        new SlashCommandBuilder()
+            .setName('antinuke')
+            .setDescription('Olympus Security Management (Owner Only)')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('setup')
+                    .setDescription('Set log channel')
+                    .addChannelOption(option =>
+                        option.setName('channel').setDescription('Log channel').setRequired(true)
+                    )
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('whitelist')
+                    .setDescription('Whitelist a user/bot')
+                    .addStringOption(option =>
+                        option.setName('action').setDescription('Add or Remove').setRequired(true)
+                            .addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' })
+                    )
+                    .addUserOption(option =>
+                        option.setName('target').setDescription('User or Bot to whitelist').setRequired(true)
+                    )
+            )
     ].map(c => c.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -253,4 +259,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-        
+                                              
