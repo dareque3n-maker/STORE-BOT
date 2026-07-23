@@ -1,10 +1,11 @@
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
 const AntiNukeConfig = require('./models/AntiNukeConfig');
 const BackupSnapshot = require('./models/BackupSnapshot');
 
+// Safe Client Initialization with explicit intents
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -17,17 +18,18 @@ const client = new Client({
     partials: [Partials.GuildMember, Partials.User, Partials.Message]
 });
 
-// Connect MongoDB & Load Handlers
-mongoose.connect(process.env.MONGO_URI || process.env.TOKEN).then(() => {
-    console.log("[DATABASE] Connected to MongoDB successfully.");
+// Connect MongoDB (Fallback to TOKEN if MONGO_URI is missing)
+const dbUri = process.env.MONGO_URI || process.env.TOKEN;
+mongoose.connect(dbUri).then(() => {
+    console.log("[DATABASE] Connected successfully.");
 }).catch(err => console.error("[DATABASE ERROR]", err));
 
+// Load Anti-Nuke Handler
 require('./handlers/antiNuke')(client);
 
 client.once('ready', async () => {
     console.log(`[READY] Anti-Nuke Bot online as ${client.user.tag}`);
 
-    // Register Slash Commands
     const commands = [
         new SlashCommandBuilder()
             .setName('security')
@@ -52,7 +54,7 @@ client.once('ready', async () => {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
         console.log('[COMMANDS] Slash commands registered globally.');
     } catch (error) {
-        console.error(error);
+        console.error("Command registration error:", error);
     }
 });
 
@@ -105,7 +107,6 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ ephemeral: true });
 
         try {
-            // 1. Recreate Categories first and map old IDs to new IDs
             const categoryMap = new Map();
             for (const catData of snapshot.categories) {
                 const newCat = await interaction.guild.channels.create({
@@ -117,7 +118,6 @@ client.on('interactionCreate', async interaction => {
                 categoryMap.set(catData.id, newCat.id);
             }
 
-            // 2. Recreate Channels under correct Categories
             for (const chData of snapshot.channels) {
                 let newParentId = null;
                 if (chData.parentId && categoryMap.has(chData.parentId)) {
@@ -137,12 +137,11 @@ client.on('interactionCreate', async interaction => {
             }
 
             return interaction.editReply({ content: `✅ Server structure successfully restored using snapshot ID: \`${restoreId}\`!` });
-        } catch (err) {
-            console.error("Restore failed:", err);
-            return interaction.editReply({ content: '❌ Failed to fully restore server structure. Check console permissions.' });
+        }CATCH (err) {
+            Console.error("Restore failed:", err);
+            Return interaction.editReply({ content: '❌ Failed to fully restore server structure. Check console permissions.' });
         }
     }
 });
 
-client.login(process.env.TOKEN);
-                 
+Client.login(process.env.TOKEN);
