@@ -1,10 +1,17 @@
 const mongoose = require('mongoose');
 
-const antiNukeConfigSchema = new mongoose.Schema({
+const AntiNukeSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
+    enabled: { type: Boolean, default: true },
     logChannelId: { type: String, default: null },
-    whitelistedBots: { type: [String], default: [] },
-    whitelistedUsers: { type: [String], default: [] }
+    whitelistedUsers: { type: [String], default: [] },
+    
+    // Rolling & Locked Emergency Backups (Auto-managed)
+    backups: [{
+        backupId: String,
+        timestamp: { type: Date, default: Date.now },
+        data: Object
+    }]
 });
 
-module.exports = mongoose.model('AntiNukeConfig', antiNukeConfigSchema);
+module.exports = mongoose.model('AntiNukeConfig', AntiNukeSchema);
